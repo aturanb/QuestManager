@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js",
-    "start": "node dist/cli.js"
+    "test": "tsc -p tsconfig.json && node --test dist/quest-simulator/tests/*.test.js",
+    "start": "node dist/quest-simulator/src/cli.js"
   },
   "dependencies": {
     "@cafequest/shared": "*",

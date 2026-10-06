@@ -6,7 +6,6 @@ import { nowIso, openDb, seedGames } from "./db.js";
 import {
   upsertDevice,
   getDevice,
-  listDevices,
   renameDevice,
   listGames,
   getGame,
@@ -92,8 +91,11 @@ export async function buildApp(cfg: AppConfig) {
     socket.on("error", () => hub.removeDashboardSocket(socket));
   });
 
-  // --- REST: devices ----------------------------------------------------------
-  app.get("/api/devices", async () => ({ devices: listDevices(db) }));
+  // --- REST: devices (enriched snapshot shape: online, expectedGame, session) ----
+  app.get("/api/devices", async () => {
+    const snap = hub.snapshot();
+    return { serverTime: snap.serverTime, devices: snap.devices };
+  });
 
   app.post("/api/devices/:deviceId/rename", async (req, reply) => {
     const { deviceId } = req.params as { deviceId: string };
