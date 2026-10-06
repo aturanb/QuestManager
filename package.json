@@ -1,0 +1,23 @@
+{
+  "name": "cafequest",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CafeQuest - proof-of-concept management system for a VR cafe (server + dashboard + Quest simulator)",
+  "workspaces": [
+    "shared",
+    "server",
+    "quest-simulator",
+    "dashboard"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev -w server & npm run dev -w dashboard & wait",
+    "server": "npm run dev -w server",
+    "dashboard": "npm run dev -w dashboard",
+    "simulator": "node quest-simulator/src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

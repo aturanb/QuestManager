@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "shared/src/**/*.ts",
+    "server/src/**/*.ts",
+    "server/tests/**/*.ts",
+    "quest-simulator/src/**/*.ts",
+    "quest-simulator/tests/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

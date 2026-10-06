@@ -1,0 +1,9 @@
+{
+  "name": "@cafequest/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'dashboard lands in a later pass'",
+    "test": "echo 'dashboard lands in a later pass'"
+  }
+}

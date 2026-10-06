@@ -1,0 +1,11 @@
+node_modules/
+dist/
+server/data/*.db
+server/data/*.db-journal
+server/data/*.db-wal
+server/data/*.db-shm
+quest-agent/app/build/
+quest-agent/.gradle/
+quest-agent/local.properties
+*.log
+.DS_Store
