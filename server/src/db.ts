@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 export type Db = Database.Database;
 
@@ -12,6 +14,11 @@ export function uuid(): string {
 }
 
 export function openDb(path: string): Db {
+  // Fresh checkouts have no data dir (it is gitignored); create it so the
+  // server boots out of the box, including for custom DB_PATH values.
+  if (path !== ":memory:") {
+    mkdirSync(dirname(path), { recursive: true });
+  }
   const db = new Database(path);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "echo 'dashboard lands in a later pass'",
-    "test": "echo 'dashboard lands in a later pass'"
+    "test": "echo 'dashboard lands in a later pass'",
+    "dev": "echo '[dashboard] UI lands in a later pass; API is on http://localhost:3000'"
   }
 }
