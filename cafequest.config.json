@@ -1,0 +1,9 @@
+{
+  "metaAppId": "1336716629531597",
+  "questServerUrl": "http://192.168.1.150:3000",
+  "games": [
+    { "id": "beat-saber", "name": "Beat Saber", "metaAppId": "2448060205267927", "enabled": true },
+    { "id": "walkabout-mini-golf", "name": "Walkabout Mini Golf", "metaAppId": "2462678267173943", "enabled": true },
+    { "id": "eleven-table-tennis", "name": "Eleven Table Tennis", "metaAppId": "1995434190525828", "enabled": true }
+  ]
+}
