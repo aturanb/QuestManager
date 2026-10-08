@@ -1,0 +1,43 @@
+package com.cafequest.agent
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class HeadsetStatusTest {
+    @Test
+    fun connectedReadsAsReady() {
+        val status = linkStatus(ConnState.CONNECTED, "192.168.1.50", 3000)
+        assertEquals("Connected", status.word)
+        assertEquals(LinkTone.READY, status.tone)
+    }
+
+    @Test
+    fun connectingNamesTheServerItIsReaching() {
+        val status = linkStatus(ConnState.CONNECTING, "192.168.1.50", 3000)
+        assertEquals("Connecting…", status.word)
+        assertEquals("Reaching 192.168.1.50:3000", status.caption)
+        assertEquals(LinkTone.WAITING, status.tone)
+    }
+
+    @Test
+    fun disconnectedTellsStaffWhatToCheck() {
+        val status = linkStatus(ConnState.DISCONNECTED, "192.168.1.50", 3000)
+        assertEquals("Not connected", status.word)
+        assertEquals("Can't reach 192.168.1.50:3000. Check the café Wi-Fi, then tap Reconnect.", status.caption)
+        assertEquals(LinkTone.OFFLINE, status.tone)
+    }
+
+    @Test
+    fun missingSetupFallsBackToThePlainName() {
+        assertEquals("Reaching the café PC", linkStatus(ConnState.CONNECTING, null, null).caption)
+        assertEquals("Reaching the café PC", linkStatus(ConnState.CONNECTING, " ", 3000).caption)
+    }
+
+    @Test
+    fun batteryKeepsOneCellUntilFlat() {
+        assertEquals(0, litBatteryCells(0))
+        assertEquals(1, litBatteryCells(7))
+        assertEquals(4, litBatteryCells(82))
+        assertEquals(5, litBatteryCells(100))
+    }
+}
