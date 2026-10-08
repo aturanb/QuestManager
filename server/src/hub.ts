@@ -2,21 +2,26 @@ import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
 import type { Db } from "./db.js";
 import {
-  upsertDevice,
   touchDevice,
   setExpectedGame,
   createCommand,
   markCommand,
   getCommand,
   getDevice,
-  activeSessionForDevice,
+  dashboardSessionForDevice,
+  latestCommandForDevice,
   sweepExpiredSessions,
   sweepTimedOutCommands,
+  replaceDeviceApps,
+  listDeviceApps,
 } from "./store.js";
 import {
   parseAgentMessage,
   type ServerCommand,
+  type ServerError,
 } from "@cafequest/shared";
+import type { AppCatalog } from "./catalog.js";
+import { resolveInstalledApp } from "./installed-apps.js";
 
 export const OFFLINE_MS = 15_000;
 export const COMMAND_TIMEOUT_MS = 10_000;
@@ -27,6 +32,16 @@ export const DASHBOARD_WS_PATH = "/dashboard-ws";
 
 type DeviceConn = { socket: WebSocket; deviceId: string };
 
+/** Typed protocol error back to an agent; never includes secrets. */
+export function sendAgentError(socket: WebSocket, code: ServerError["code"], message: string): void {
+  try {
+    const err: ServerError = { type: "error", protocolVersion: 1, code, message };
+    socket.send(JSON.stringify(err));
+  } catch {
+    /* socket already gone */
+  }
+}
+
 export class Hub {
   private devices = new Map<string, DeviceConn>();
   private dashboards = new Set<WebSocket>();
@@ -36,6 +51,8 @@ export class Hub {
   constructor(
     private fastify: FastifyInstance,
     private db: Db,
+    /** Read live: POST /api/catalog/refresh swaps the catalog without a restart. */
+    private catalog: () => AppCatalog,
     private onDeviceChanged: () => void = () => {}
   ) {
     this.log = fastify.log;
@@ -60,6 +77,17 @@ export class Hub {
   }
 
   addAgentSocket(deviceId: string, socket: WebSocket): void {
+    const prev = this.devices.get(deviceId);
+    if (prev && prev.socket !== socket) {
+      // Newest hello wins; the stale socket is told why so it stops retrying blindly.
+      sendAgentError(prev.socket, "DUPLICATE_DEVICE", "replaced by a newer connection for this device");
+      try {
+        prev.socket.close(4001, "duplicate-connection");
+      } catch {
+        /* already gone */
+      }
+      this.log.warn({ device: deviceId }, "duplicate connection replaced");
+    }
     this.devices.set(deviceId, { socket, deviceId });
     this.onDeviceChanged();
     this.pushDashboardState();
@@ -99,61 +127,91 @@ export class Hub {
       return;
     }
     const msg = parsed.value;
+    // A connection may only speak for the device its hello claimed.
+    if (msg.type !== "hello" && msg.deviceId !== deviceId) {
+      sendAgentError(socket, "DEVICE_MISMATCH", "message deviceId does not match this connection");
+      this.log.warn({ device: deviceId }, "rejected mismatched deviceId");
+      return;
+    }
     // Heartbeat/telemetry drives liveness; other messages also refresh lastSeen.
     if (msg.type === "telemetry") {
       touchDevice(this.db, deviceId, {
         batteryLevel: msg.battery.level,
         charging: msg.battery.charging,
+        ...(msg.usage
+          ? {
+              usageAccessGranted: msg.usage.accessGranted,
+              foregroundApp: msg.usage.accessGranted ? msg.usage.foregroundApp : null,
+            }
+          : {}),
       });
       setExpectedGame(this.db, deviceId, msg.expectedCurrentGame);
       this.log.debug({ device: deviceId, battery: msg.battery.level }, "telemetry");
-    } else if (msg.type === "command_ack") {
-      markCommand(this.db, msg.commandId, "received");
-      this.log.info({ device: deviceId, commandId: msg.commandId }, "command acknowledged (received)");
+    } else if (msg.type === "installed_apps") {
+      try {
+        replaceDeviceApps(this.db, deviceId, msg.apps, msg.scannedAt);
+      } catch (error) {
+        this.log.error({ device: deviceId, err: error }, "failed to persist installed app inventory");
+        sendAgentError(socket, "INTERNAL", "failed to persist installed app inventory");
+        return;
+      }
+      touchDevice(this.db, deviceId, {});
+      this.log.info({ device: deviceId, count: msg.apps.length }, "installed app inventory updated");
       this.pushDashboardState();
-    } else if (msg.type === "command_result") {
-      markCommand(this.db, msg.commandId, msg.status === "success" ? "success" : "failed", msg.error);
-      this.log.info(
-        { device: deviceId, commandId: msg.commandId, result: msg.status, error: msg.error ?? null },
-        "command result"
-      );
-      this.pushDashboardState();
+    } else if (msg.type === "command_ack" || msg.type === "command_result") {
+      this.handleCommandMessage(deviceId, socket, msg);
     } else {
       // hello or anything else: just refresh liveness
       touchDevice(this.db, deviceId, {});
     }
   }
 
-  /**
-   * Queue a launch command. If the device is connected we deliver immediately;
-   * otherwise it stays 'queued' and is delivered on the device's next connect.
-   * Returns the command id.
-   */
-  queueLaunch(deviceId: string, game: { gameId: string; name: string; metaAppId: string }): string {
-    const cmd = createCommand(this.db, deviceId, "launch_app");
-    const deliver = this.devices.has(deviceId);
-    if (deliver) {
-      this.deliver(cmd.id, deviceId, game);
+  /** Ownership + idempotency guard shared by acks and results. */
+  private handleCommandMessage(
+    deviceId: string,
+    socket: WebSocket,
+    msg: { commandId: string; type: string; status: string; error?: string }
+  ): void {
+    const cmd = getCommand(this.db, msg.commandId);
+    if (!cmd) {
+      sendAgentError(socket, "UNKNOWN_COMMAND", "no such command");
+      return;
     }
-    this.pushDashboardState();
-    return cmd.id;
+    if (cmd.deviceId !== deviceId) {
+      sendAgentError(socket, "FOREIGN_COMMAND", "command belongs to another device");
+      this.log.warn({ device: deviceId, commandId: msg.commandId }, "rejected foreign command message");
+      return;
+    }
+    if (cmd.status === "success" || cmd.status === "failed" || cmd.status === "timeout") {
+      // Late/duplicate delivery (retries, timeouts racing results): ignore, never regress.
+      this.log.debug({ device: deviceId, commandId: msg.commandId }, "late/duplicate result ignored");
+      return;
+    }
+    if (msg.type === "command_ack") {
+      markCommand(this.db, msg.commandId, "received");
+      this.log.info({ device: deviceId, commandId: msg.commandId }, "command acknowledged (received)");
+      this.pushDashboardState();
+    } else {
+      markCommand(this.db, msg.commandId, msg.status === "success" ? "success" : "failed", msg.error);
+      this.log.info(
+        { device: deviceId, commandId: msg.commandId, result: msg.status, error: msg.error ?? null },
+        "command result"
+      );
+      this.pushDashboardState();
+    }
   }
 
-  /** Send all queued commands for a freshly connected device. */
-  deliverQueuedCommands(deviceId: string): void {
-    const rows = this.db
-      .prepare(`SELECT id FROM commands WHERE device_id = ? AND status = 'queued' ORDER BY created_at ASC`)
-      .all(deviceId) as Array<{ id: string }>;
-    for (const r of rows) {
-      const cmd = getCommand(this.db, r.id);
-      if (!cmd) continue;
-      // We only persist launch commands today; payload is reconstructed from games.
-      const game = this.db
-        .prepare(`SELECT id, name, meta_app_id FROM games WHERE id = (SELECT expected_game_id FROM devices WHERE id = ?)`)
-        .get(deviceId) as any;
-      const meta = game ?? { id: "unknown", name: "unknown", meta_app_id: "unknown" };
-      this.deliver(cmd.id, deviceId, { gameId: meta.id, name: meta.name, metaAppId: meta.meta_app_id });
-    }
+  /**
+   * Create and immediately deliver a launch command. Returns null when the
+   * device is not connected (the REST layer answers 409 offline); there is no
+   * store-and-forward queue, so HTTP 202 always means "sent to the socket".
+   */
+  queueLaunch(deviceId: string, game: { gameId: string; name: string; metaAppId: string }): string | null {
+    if (!this.devices.has(deviceId)) return null;
+    const cmd = createCommand(this.db, deviceId, "launch_app");
+    this.deliver(cmd.id, deviceId, game);
+    this.pushDashboardState();
+    return cmd.id;
   }
 
   private deliver(commandId: string, deviceId: string, game: { gameId: string; name: string; metaAppId: string }): void {
@@ -200,7 +258,12 @@ export class Hub {
     return {
       serverTime: new Date(now).toISOString(),
       devices: devices.map((d) => {
-        const session = activeSessionForDevice(this.db, d.id);
+        const session = dashboardSessionForDevice(this.db, d.id);
+        const lastCommand = latestCommandForDevice(this.db, d.id);
+        const installedApps = listDeviceApps(this.db, d.id).map((app) => resolveInstalledApp(this.db, this.catalog(), app));
+        const foregroundInstalled = d.foreground_package_name
+          ? installedApps.find((app) => app.packageName === d.foreground_package_name)
+          : null;
         return {
           id: d.id,
           name: d.name,
@@ -213,10 +276,21 @@ export class Hub {
             d.expected_game_id && d.expected_game_name
               ? { gameId: d.expected_game_id, name: d.expected_game_name, launchedAt: d.expected_game_started_at }
               : null,
+          usageAccessGranted: d.usage_access_granted === null ? null : !!d.usage_access_granted,
+          foregroundApp:
+            foregroundInstalled && d.foreground_started_at
+              ? {
+                  packageName: foregroundInstalled.packageName,
+                  name: foregroundInstalled.name,
+                  startedAt: d.foreground_started_at,
+                }
+              : null,
           online: !!d.last_seen_at && now - new Date(d.last_seen_at).getTime() <= OFFLINE_MS,
           session: session
             ? { id: session.id, startedAt: session.startedAt, endsAt: session.endsAt, status: session.status }
             : null,
+          lastCommand: lastCommand ? { id: lastCommand.id, status: lastCommand.status, error: lastCommand.error } : null,
+          installedApps,
         };
       }),
     };

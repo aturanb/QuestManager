@@ -1,0 +1,118 @@
+import assert from "node:assert/strict";
+import { after, test } from "node:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { buildApp } from "../src/app.js";
+import { getGameByPackage, upsertDevice } from "../src/store.js";
+
+const dir = mkdtempSync(join(tmpdir(), "cq-installed-apps-"));
+const catalogPath = join(dir, "catalog.json");
+writeFileSync(catalogPath, JSON.stringify([
+  { appName: "Breachers", packageName: "com.TriangleFactory.Breachers", id: "5740397619319389" },
+]));
+
+const { app, db, hub } = await buildApp({
+  dbPath: ":memory:",
+  port: 0,
+  host: "127.0.0.1",
+  appCatalogPath: catalogPath,
+});
+after(() => app.close());
+
+const deviceId = randomUUID();
+upsertDevice(db, { id: deviceId, name: "Quest Test", model: "Quest 3", agentVersion: "0.1.0" });
+
+const sent: string[] = [];
+const socket = {
+  send(value: string) { sent.push(value); },
+  close() {},
+};
+hub.addAgentSocket(deviceId, socket as any);
+
+test("installed_apps inventory is persisted and catalog matches appear in snapshots", async () => {
+  hub.handleAgentMessage(deviceId, socket as any, JSON.stringify({
+    type: "installed_apps",
+    protocolVersion: 1,
+    deviceId,
+    scannedAt: "2026-10-08T12:00:00.000Z",
+    apps: [
+      { packageName: "com.TriangleFactory.Breachers", label: "Breachers", versionName: "1.0", versionCode: 10 },
+      { packageName: "com.example.unknown", label: "Unknown Game", versionName: null, versionCode: null },
+    ],
+  }));
+
+  const response = await app.inject({ method: "GET", url: "/api/devices" });
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  const installed = body.devices[0].installedApps;
+  assert.equal(installed.length, 2);
+  assert.deepEqual(installed[0], {
+    packageName: "com.TriangleFactory.Breachers",
+    label: "Breachers",
+    versionName: "1.0",
+    versionCode: 10,
+    name: "Breachers",
+    metaAppId: "5740397619319389",
+    source: "catalog",
+  });
+  assert.equal(installed[1].packageName, "com.example.unknown");
+  assert.equal(installed[1].metaAppId, null);
+  assert.equal(installed[1].source, null);
+});
+
+test("admin can map an unknown installed package and launch it by package name", async () => {
+  const mapped = await app.inject({
+    method: "PUT",
+    url: `/api/devices/${deviceId}/apps/com.example.unknown`,
+    payload: { name: "My Local Game", metaAppId: "1234567890123456" },
+  });
+  assert.equal(mapped.statusCode, 200);
+  assert.equal(mapped.json().app.source, "manual");
+
+  const conflictingGame = await app.inject({
+    method: "PUT",
+    url: "/api/games/another-game",
+    payload: {
+      name: "Conflicting Game",
+      metaAppId: "9999999999999999",
+      packageName: "com.example.unknown",
+    },
+  });
+  assert.equal(conflictingGame.statusCode, 409);
+  assert.equal(conflictingGame.json().error, "package_already_mapped");
+
+  const launch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${deviceId}/launch-installed`,
+    payload: { packageName: "com.example.unknown" },
+  });
+  assert.equal(launch.statusCode, 202);
+  const command = sent.map((value) => JSON.parse(value)).find((value) => value.type === "command");
+  assert.equal(command.payload.metaAppId, "1234567890123456");
+  assert.equal(command.payload.gameName, "My Local Game");
+
+  const otherDeviceId = randomUUID();
+  upsertDevice(db, { id: otherDeviceId, name: "Other Quest", model: "Quest 3", agentVersion: "0.1.0" });
+  hub.addAgentSocket(otherDeviceId, { send() {}, close() {} } as any);
+  const manualGame = getGameByPackage(db, "com.example.unknown");
+  assert.ok(manualGame);
+  const crossDeviceLaunch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${otherDeviceId}/launch`,
+    payload: { gameId: manualGame.id },
+  });
+  assert.equal(crossDeviceLaunch.statusCode, 400);
+  assert.equal(crossDeviceLaunch.json().error, "app_not_installed");
+});
+
+test("launch-installed rejects packages not reported by that headset", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/devices/${deviceId}/launch-installed`,
+    payload: { packageName: "com.example.notinstalled" },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error, "app_not_installed");
+});

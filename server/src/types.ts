@@ -12,6 +12,9 @@ export type DeviceRow = {
   expectedGameId: string | null;
   expectedGameName: string | null;
   expectedGameStartedAt: string | null;
+  usageAccessGranted: 0 | 1 | null;
+  foregroundPackageName: string | null;
+  foregroundStartedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -20,9 +23,19 @@ export type GameRow = {
   id: string;
   name: string;
   metaAppId: string;
+  packageName: string | null;
   enabled: 0 | 1;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DeviceAppRow = {
+  deviceId: string;
+  packageName: string;
+  label: string;
+  versionName: string | null;
+  versionCode: number | null;
+  scannedAt: string;
 };
 
 export type SessionRow = {

@@ -1,6 +1,7 @@
 import type { Db } from "./db.js";
 import { nowIso, uuid } from "./db.js";
-import type { DeviceRow, GameRow, SessionRow, CommandRow } from "./types.js";
+import type { DeviceRow, GameRow, SessionRow, CommandRow, DeviceAppRow } from "./types.js";
+import type { InstalledApp } from "@cafequest/shared";
 
 export type NewDeviceInput = {
   id: string;
@@ -46,6 +47,9 @@ function mapDevice(r: any): DeviceRow {
     expectedGameId: r.expected_game_id,
     expectedGameName: r.expected_game_name,
     expectedGameStartedAt: r.expected_game_started_at,
+    usageAccessGranted: r.usage_access_granted === null ? null : r.usage_access_granted ? 1 : 0,
+    foregroundPackageName: r.foreground_package_name,
+    foregroundStartedAt: r.foreground_started_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -63,7 +67,12 @@ export function listDevices(db: Db): DeviceRow[] {
 export function touchDevice(
   db: Db,
   id: string,
-  fields: { batteryLevel?: number; charging?: boolean }
+  fields: {
+    batteryLevel?: number;
+    charging?: boolean;
+    usageAccessGranted?: boolean;
+    foregroundApp?: { packageName: string; startedAt: string } | null;
+  }
 ): void {
   const sets: string[] = ["last_seen_at = ?", "updated_at = ?"];
   const args: unknown[] = [nowIso(), nowIso()];
@@ -74,6 +83,14 @@ export function touchDevice(
   if (fields.charging !== undefined) {
     sets.push("charging = ?");
     args.push(fields.charging ? 1 : 0);
+  }
+  if (fields.usageAccessGranted !== undefined) {
+    sets.push("usage_access_granted = ?");
+    args.push(fields.usageAccessGranted ? 1 : 0);
+  }
+  if (fields.foregroundApp !== undefined) {
+    sets.push("foreground_package_name = ?", "foreground_started_at = ?");
+    args.push(fields.foregroundApp?.packageName ?? null, fields.foregroundApp?.startedAt ?? null);
   }
   args.push(id);
   db.prepare(`UPDATE devices SET ${sets.join(", ")} WHERE id = ?`).run(...args);
@@ -94,6 +111,21 @@ export function renameDevice(db: Db, id: string, name: string): DeviceRow | null
   return getDevice(db, id);
 }
 
+/**
+ * Removes a headset and everything recorded against it. sessions/commands
+ * reference devices without ON DELETE CASCADE (SQLite cannot add it to an
+ * existing table), so children go first, in one transaction.
+ */
+export function deleteDevice(db: Db, id: string): boolean {
+  const remove = db.transaction((deviceId: string) => {
+    db.prepare("DELETE FROM commands WHERE device_id = ?").run(deviceId);
+    db.prepare("DELETE FROM sessions WHERE device_id = ?").run(deviceId);
+    db.prepare("DELETE FROM device_apps WHERE device_id = ?").run(deviceId);
+    return db.prepare("DELETE FROM devices WHERE id = ?").run(deviceId).changes > 0;
+  });
+  return remove(id);
+}
+
 // --- games -----------------------------------------------------------------
 
 function mapGame(r: any): GameRow {
@@ -101,6 +133,7 @@ function mapGame(r: any): GameRow {
     id: r.id,
     name: r.name,
     metaAppId: r.meta_app_id,
+    packageName: r.package_name,
     enabled: r.enabled ? 1 : 0,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -116,14 +149,67 @@ export function getGame(db: Db, id: string): GameRow | null {
   return r ? mapGame(r) : null;
 }
 
-export function upsertGame(db: Db, g: { id: string; name: string; metaAppId: string; enabled?: boolean }): GameRow {
+export function getGameByPackage(db: Db, packageName: string): GameRow | null {
+  const r = db.prepare("SELECT * FROM games WHERE package_name = ?").get(packageName) as any;
+  return r ? mapGame(r) : null;
+}
+
+export function upsertGame(
+  db: Db,
+  g: { id: string; name: string; metaAppId: string; packageName?: string | null; enabled?: boolean }
+): GameRow {
   const now = nowIso();
+  const packageName = g.packageName === undefined ? getGame(db, g.id)?.packageName ?? null : g.packageName;
   db.prepare(
-    `INSERT INTO games (id, name, meta_app_id, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET name = excluded.name, meta_app_id = excluded.meta_app_id, enabled = excluded.enabled, updated_at = excluded.updated_at`
-  ).run(g.id, g.name, g.metaAppId, g.enabled === false ? 0 : 1, now, now);
+    `INSERT INTO games (id, name, meta_app_id, package_name, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, meta_app_id = excluded.meta_app_id,
+       package_name = excluded.package_name, enabled = excluded.enabled, updated_at = excluded.updated_at`
+  ).run(g.id, g.name, g.metaAppId, packageName, g.enabled === false ? 0 : 1, now, now);
   return getGame(db, g.id) as GameRow;
+}
+
+// --- device application inventory -----------------------------------------
+
+function mapDeviceApp(r: any): DeviceAppRow {
+  return {
+    deviceId: r.device_id,
+    packageName: r.package_name,
+    label: r.label,
+    versionName: r.version_name,
+    versionCode: r.version_code,
+    scannedAt: r.scanned_at,
+  };
+}
+
+/** Replace one headset's inventory atomically so removed apps disappear. */
+export function replaceDeviceApps(db: Db, deviceId: string, apps: InstalledApp[], scannedAt = nowIso()): void {
+  const uniqueApps = new Map<string, InstalledApp>();
+  for (const app of apps) uniqueApps.set(app.packageName, app);
+  const replace = db.transaction(() => {
+    db.prepare("DELETE FROM device_apps WHERE device_id = ?").run(deviceId);
+    const insert = db.prepare(
+      `INSERT INTO device_apps (device_id, package_name, label, version_name, version_code, scanned_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    for (const app of uniqueApps.values()) {
+      insert.run(deviceId, app.packageName, app.label, app.versionName, app.versionCode, scannedAt);
+    }
+  });
+  replace();
+}
+
+export function listDeviceApps(db: Db, deviceId: string): DeviceAppRow[] {
+  return (db
+    .prepare("SELECT * FROM device_apps WHERE device_id = ? ORDER BY label COLLATE NOCASE, package_name")
+    .all(deviceId) as any[]).map(mapDeviceApp);
+}
+
+export function getDeviceApp(db: Db, deviceId: string, packageName: string): DeviceAppRow | null {
+  const row = db
+    .prepare("SELECT * FROM device_apps WHERE device_id = ? AND package_name = ?")
+    .get(deviceId, packageName) as any;
+  return row ? mapDeviceApp(row) : null;
 }
 
 // --- sessions ----------------------------------------------------------------
@@ -171,6 +257,15 @@ export function activeSessionForDevice(db: Db, deviceId: string): SessionRow | n
     )
     .get(deviceId) as any;
   return r ? mapSession(r) : null;
+}
+
+/** Latest session shown on the dashboard; stopped sessions clear the card. */
+export function dashboardSessionForDevice(db: Db, deviceId: string): SessionRow | null {
+  const r = db
+    .prepare(`SELECT * FROM sessions WHERE device_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`)
+    .get(deviceId) as any;
+  if (!r || (r.status !== "active" && r.status !== "expired")) return null;
+  return mapSession(r);
 }
 
 export function extendSession(db: Db, id: string, minutes: number): SessionRow | null {
@@ -236,6 +331,14 @@ export function getCommand(db: Db, id: string): CommandRow | null {
   return r ? mapCommand(r) : null;
 }
 
+/** Newest command for a device (drives the dashboard launch-state badge). */
+export function latestCommandForDevice(db: Db, deviceId: string): CommandRow | null {
+  const r = db
+    .prepare(`SELECT * FROM commands WHERE device_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+    .get(deviceId) as any;
+  return r ? mapCommand(r) : null;
+}
+
 export function markCommand(db: Db, id: string, status: CommandRow["status"], error?: string): CommandRow | null {
   const now = nowIso();
   const c = getCommand(db, id);
@@ -255,12 +358,12 @@ export function markCommand(db: Db, id: string, status: CommandRow["status"], er
   return getCommand(db, id);
 }
 
-/** Timed-out sweep: sent/received commands older than 10s become timeout (§21). */
+/** Timed-out sweep: sent/received/queued commands older than 10s become timeout (§21). */
 export function sweepTimedOutCommands(db: Db, timeoutMs = 10_000): number {
   const cutoff = new Date(Date.now() - timeoutMs).toISOString();
   const r = db
     .prepare(
-      `UPDATE commands SET status = 'timeout', completed_at = ? WHERE status IN ('sent', 'received') AND created_at <= ?`
+      `UPDATE commands SET status = 'timeout', completed_at = ? WHERE status IN ('sent', 'received', 'queued') AND created_at <= ?`
     )
     .run(nowIso(), cutoff);
   return r.changes;

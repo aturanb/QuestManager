@@ -35,6 +35,9 @@ export function openDb(path: string): Db {
       expected_game_id TEXT,
       expected_game_name TEXT,
       expected_game_started_at TEXT,
+      usage_access_granted INTEGER,
+      foreground_package_name TEXT,
+      foreground_started_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -42,6 +45,7 @@ export function openDb(path: string): Db {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       meta_app_id TEXT NOT NULL,
+      package_name TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -65,7 +69,32 @@ export function openDb(path: string): Db {
       completed_at TEXT,
       error TEXT
     );
+    CREATE TABLE IF NOT EXISTS device_apps (
+      device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      package_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      version_name TEXT,
+      version_code INTEGER,
+      scanned_at TEXT NOT NULL,
+      PRIMARY KEY (device_id, package_name)
+    );
   `);
+  // Existing POC databases predate Android package mappings.
+  const gameColumns = db.prepare("PRAGMA table_info(games)").all() as Array<{ name: string }>;
+  if (!gameColumns.some((column) => column.name === "package_name")) {
+    db.exec("ALTER TABLE games ADD COLUMN package_name TEXT");
+  }
+  const deviceColumns = db.prepare("PRAGMA table_info(devices)").all() as Array<{ name: string }>;
+  if (!deviceColumns.some((column) => column.name === "usage_access_granted")) {
+    db.exec("ALTER TABLE devices ADD COLUMN usage_access_granted INTEGER");
+  }
+  if (!deviceColumns.some((column) => column.name === "foreground_package_name")) {
+    db.exec("ALTER TABLE devices ADD COLUMN foreground_package_name TEXT");
+  }
+  if (!deviceColumns.some((column) => column.name === "foreground_started_at")) {
+    db.exec("ALTER TABLE devices ADD COLUMN foreground_started_at TEXT");
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_games_package_name ON games(package_name) WHERE package_name IS NOT NULL");
   return db;
 }
 

@@ -6,20 +6,23 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "dev": "tsc -p tsconfig.json && node dist/src/index.js",
-    "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js"
+    "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js",
+    "catalog:update": "npm run build && node scripts/update-catalog.mjs"
   },
   "dependencies": {
     "@cafequest/shared": "*",
     "@fastify/websocket": "^10.0.1",
     "fastify": "^4.28.1",
     "better-sqlite3": "^11.3.0",
+    "ws": "^8.18.0",
     "zod": "^3.3.1",
     "uuid": "^10.0.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
     "@types/node": "^22.5.0",
-    "@types/better-sqlite3": "^7.6.11"
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/ws": "^8.5.10"
   },
   "type": "module"
 }
