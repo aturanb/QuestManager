@@ -7,7 +7,18 @@ import WebSocket from "ws";
 import { buildApp } from "../../server/src/app.js";
 import { DeviceSim } from "../src/deviceSim.js";
 
-const { app, db } = await buildApp({ dbPath: ":memory:", port: 0, host: "127.0.0.1" });
+// E2E drives real launches, so it seeds real (test-only) Meta App IDs;
+// placeholder IDs are rejected by design (see server/tests/config.test.ts).
+const { app, db } = await buildApp({
+  dbPath: ":memory:",
+  port: 0,
+  host: "127.0.0.1",
+  games: [
+    { id: "beat-saber", name: "Beat Saber", metaAppId: "test-beat-saber", enabled: true },
+    { id: "walkabout-mini-golf", name: "Walkabout Mini Golf", metaAppId: "test-walkabout", enabled: true },
+    { id: "eleven-table-tennis", name: "Eleven Table Tennis", metaAppId: "test-eleven", enabled: true },
+  ],
+});
 await app.listen({ port: 0, host: "127.0.0.1" });
 const addr = app.server.address();
 const port = typeof addr === "object" && addr ? addr.port : 0;
@@ -89,6 +100,16 @@ test("simulated shift: connect, session, launch, switch, failure, timeout, recon
     const d = await deviceState(sim.deviceId);
     return d?.expectedGame?.name === "Beat Saber";
   });
+
+  // The real foreground game (UsageStats path) reaches the dashboard snapshot,
+  // resolved from the reported inventory rather than from the launch request.
+  await waitUntil(async () => {
+    const d = await deviceState(sim.deviceId);
+    return d?.foregroundApp?.packageName === "com.beatgames.beatsaber";
+  });
+  const playing = await deviceState(sim.deviceId);
+  assert.equal(playing.usageAccessGranted, true);
+  assert.ok(Date.parse(playing.foregroundApp.startedAt) > 0);
 
   // Game A -> Game B switch (the critical experiment, simulated)
   const lres2 = await fetch(`${base}/api/devices/${sim.deviceId}/launch`, {
