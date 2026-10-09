@@ -105,7 +105,10 @@ Changing a message shape means touching all three plus their tests.
 ### Invariants to preserve
 
 - **Online** = `now - lastSeenAt <= 15s` (`OFFLINE_MS`), re-evaluated by the 1s
-  sweep, which also closes stale sockets with code 4000.
+  sweep, which also closes stale sockets with code 4000. Pongs to the hub's 5s
+  ping refresh `lastSeenAt` like any agent message; without them a headset whose
+  telemetry stalls (suspected: asleep) flickers Offline ~1s every ~16s (sweep
+  close, then the agent's 1s reconnect).
 - **`expectedCurrentGame`** is only "the last launch CafeQuest asked for". The
   true foreground app is the separate `usage`/`foregroundApp` channel, from
   Android `UsageStats` on the agent; keep the two distinct in the UI.
@@ -126,7 +129,10 @@ Changing a message shape means touching all three plus their tests.
   `last_seen_at`, otherwise the sweep drops reconnects before first telemetry.
 - **Sessions**: server clock is authoritative (`remaining = endsAt - serverTime`,
   dashboard corrects skew with `serverTime - Date.now()`). Expiry never touches
-  the headset.
+  the headset. Unlimited sessions (`minutes: null`) report `endsAt: null` while
+  running, but the DB keeps `ends_at NOT NULL` (start time, `open_ended = 1`),
+  so any new query on `ends_at` must check the flag. Stop writes the real end,
+  and a stopped unlimited session stays in the snapshot until the next one.
 - **DB beats config**: `seedConfiguredGames` inserts missing games and upgrades a
   placeholder `metaAppId` to a real one, but never overwrites values staff set.
 
@@ -175,3 +181,9 @@ GET_USAGE_STATS allow` once per headset.
 - Hardware behavior is unverified by design; record results in
   `docs/poc-test-results.md` and keep `docs/known-limitations.md` honest rather
   than quietly claiming a path works.
+- UI text lives in `dashboard/src/messages.tsx` and
+  `quest-agent/.../AgentStrings.kt`, English and Turkish side by side; a string
+  without its Turkish twin does not compile. Turkish phrases never suffix a
+  device or game name ("Quest 02'yi" vs "Quest 01'i"): put the name before
+  "için" or before a suffixed noun. The dashboard test "leaves no English on a
+  Turkish card" catches hard-coded English in `DeviceCard`.

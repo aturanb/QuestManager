@@ -39,9 +39,22 @@
 - **A sleeping headset pauses its game**: taking the headset off fires
   ACTIVITY_PAUSED, so **Open now** becomes "No game open" and the
   duration restarts when it wakes. The café session timer is unaffected.
+- **Online means the socket answers, not that telemetry is fresh**: the hub's
+  5s ping keeps a headset online while it answers, even after its telemetry
+  stops, so battery and **Open now** can be its last report. Whether a sleeping
+  Quest answers pings is UNVERIFIED on hardware (docs/morning-test.md row 13).
 - **Usage access needs an adb grant**: `PACKAGE_USAGE_STATS` is not user-grantable
   on Quest, so each headset needs `adb shell appops set com.cafequest.agent
   GET_USAGE_STATS allow` once (see docs/quest-setup.md).
 - **Catalog refresh needs the internet**: the dashboard's *Update app list*
   button reaches `raw.githubusercontent.com`. On a café LAN with no WAN access
   it fails and keeps the mappings already cached.
+- **Model is whatever the headset reports**: the card's **Model** row shows
+  Android's `Build.MODEL` from the agent's hello. A Quest 3 reports "Quest 3"
+  (seen on hardware); what a Quest 2, Pro or 3S reports is UNVERIFIED. The
+  simulator always reports "Quest 3".
+- **Turkish covers CafeQuest's own words**: game and device names, server
+  error details for codes the dashboard does not know, agent error codes
+  (`META_APP_ID_NOT_CONFIGURED`) and Meta SDK messages are shown as sent, after
+  a Turkish lead-in such as "Açılamadı: …". The language pick is per browser
+  and per headset, not café-wide.

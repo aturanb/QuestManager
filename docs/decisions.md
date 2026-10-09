@@ -130,3 +130,32 @@ going for minutes. Separately, the launch's ACTIVITY_RESUMED was present in
 `dumpsys usagestats` but never returned by a query, because the old window had
 already advanced past its timestamp before Android flushed it. Both are covered
 by unit tests that reproduce the hardware behavior.
+
+## Pongs prove liveness
+
+Decision: the hub pings every agent socket every 5s, and the pong refreshes
+`last_seen_at` (`touchDevice`) like any agent message.
+
+Reason: a connected headset showed Offline for about a second, then Online
+again. Whenever the agent's 5s telemetry stops while its socket stays healthy,
+the sweep closes the socket at 15s and the agent's 1s-backoff reconnect brings
+it back, every ~16s. Reproduced against the real server; the hardware trigger
+(suspected: a sleeping headset's telemetry timer freezing) is not verified, see
+docs/morning-test.md row 13. OkHttp answers pings by itself, so the agent did
+not change. Covered by `server/tests/ownership.test.ts` ("pong proves
+liveness").
+
+## Unlimited sessions keep `ends_at` NOT NULL
+
+Decision: `POST /api/devices/:id/sessions` with `{ "minutes": null }` starts an
+unlimited session, stored with `open_ended = 1` and `ends_at` set to its start
+time until Stop writes when play ended. The API and snapshot report
+`endsAt: null` while it runs; the expiry sweep skips it and extend refuses it
+(409 `session has no time limit`). A stopped unlimited session stays on the
+board until the next session starts; a stopped timed session still clears it.
+
+Reason: staff charge open-ended customers by time played, so the played time
+must survive Stop. SQLite cannot drop `NOT NULL` from `ends_at` without
+rebuilding the table, and POC migrations are additive, so the flag is a new
+column instead. Covered by `server/tests/store.test.ts` and
+`server/tests/sessions.test.ts`.

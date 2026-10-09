@@ -24,6 +24,7 @@ Date: 2026-10-08
 | Wi-Fi reconnect | NOT TESTED | Airplane-mode cycle not performed. |
 | Session tracking | NOT TESTED on hardware | Covered by the simulator e2e test only. |
 | Reboot recovery | NOT TESTED | No BOOT_COMPLETED receiver exists; the agent currently starts when CafeQuest is opened. |
+| Headset app in Turkish | NOT TESTED | EN/TR switch and SharedPreferences pick built and JVM unit-tested; this APK has not been installed on a Quest yet (morning-test row 15). |
 
 ## Bugs found during this hardware run
 
@@ -41,6 +42,17 @@ that reproduce the hardware behavior.
    19:24:05; that one-second blink overwrote and then cleared a Breachers run
    that had been going since 19:20:50. The tracker now keeps the set of resumed
    managed packages and reports the most recently resumed one still resumed.
+
+## Reported after this run (2026-10-09)
+
+- **Online flickered off for ~1s at a time** while the headset was connected.
+  Reproduced against the real server: whenever telemetry stops but the socket
+  stays up, the sweep drops it at 15s and the agent's 1s reconnect restores it,
+  every ~16s. The hub now pings agents every 5s and counts the pong as
+  liveness. Neither the hardware trigger (suspected: sleep freezing the agent's
+  telemetry timer) nor the fix is tested on hardware yet; see morning-test row
+  13. A spot check reads Online 15 of every 16 seconds, so the Sleep/wake PASS
+  above does not rule this out.
 
 ## Critical experiment (§50)
 
