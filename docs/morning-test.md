@@ -51,7 +51,7 @@ connect**.
 | 9 | After one dashboard launch, return to CafeQuest and tap **Test app launch**: the last game relaunches and Last result becomes `SUCCESS` | |
 | 10 | Start a 1-minute custom session: after expiry, `Time up` remains visible and the card offers new-session controls | |
 | 11 | Click **Update app list** at the bottom of the dashboard: the count refreshes and the "updated" label resets to `just now` | |
-| 12 | Rename the headset on its setup screen without retyping the key: after **Save and connect** it reconnects (the key survived the edit) | |
+| 12 | Rename the headset on its setup screen without touching anything else: after **Save and connect** it reconnects to the same server and the Meta App ID is still filled in | |
 | 13 | Take the headset off and let it sleep 2 min with the dashboard open: the card stays `Online` throughout, no 1s `Offline` flashes, and the server log has no `device stale; dropping socket` | |
 | 14 | Start an **Unlimited** session: the clock counts up and only **Stop** is offered. Press **Stop**: the card turns Free but keeps the played time until the next session starts | |
 | 15 | Tap **TR** in the dashboard header and on the headset's CafeQuest screen: both switch to Turkish at once. Refresh the dashboard and force-close and reopen CafeQuest: both are still Turkish | |
