@@ -16,6 +16,7 @@ import {
   stopSession,
 } from "./api";
 import { BoardSummary } from "./components/BoardSummary";
+import { BulkActions, type BulkResult } from "./components/BulkActions";
 import { CatalogButton } from "./components/CatalogButton";
 import { DeviceCard } from "./components/DeviceCard";
 import { KeyPrompt } from "./components/KeyPrompt";
@@ -30,6 +31,9 @@ export function App() {
   const [key, setKey] = useState(() => localStorage.getItem(KEY_STORAGE) ?? "");
   const [keyRequired, setKeyRequired] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [wsLive, setWsLive] = useState(false);
@@ -56,6 +60,18 @@ export function App() {
     setKeyRequired(true);
     wsRef.current?.close();
   }, []);
+
+  useEffect(() => {
+    const liveIds = new Set(devices.map((device) => device.id));
+    setSelectedIds((current) => {
+      const kept = new Set([...current].filter((id) => liveIds.has(id)));
+      return kept.size === current.size ? current : kept;
+    });
+  }, [devices]);
+
+  useEffect(() => {
+    setBulkResult(null);
+  }, [selectedIds]);
 
   // Initial load + live channel. WS reconnects with backoff; 401/4401 -> key prompt.
   useEffect(() => {
@@ -163,6 +179,84 @@ export function App() {
     }
   }
 
+  async function startBulkSession(minutes: number | null) {
+    const selected = devices.filter((device) => selectedIds.has(device.id));
+    setBulkBusy(true);
+    setBulkResult(null);
+    setBusy((current) => ({
+      ...current,
+      ...Object.fromEntries(selected.map((device) => [device.id, true])),
+    }));
+
+    const eligible = selected.filter((device) => device.online && device.session?.status !== "active");
+    setCardErrors((current) => {
+      const next = { ...current };
+      for (const device of selected) {
+        if (!device.online) next[device.id] = new ApiError(409, "headset offline");
+        else if (device.session?.status === "active") next[device.id] = new ApiError(409, "session already active");
+        else next[device.id] = null;
+      }
+      return next;
+    });
+
+    const results = await Promise.all(eligible.map(async (device) => {
+      try {
+        await startSession(key, device.id, minutes);
+        return true;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) demandKey();
+        setCardErrors((current) => ({ ...current, [device.id]: error }));
+        return false;
+      }
+    }));
+    const succeeded = results.filter(Boolean).length;
+
+    setBusy((current) => ({
+      ...current,
+      ...Object.fromEntries(selected.map((device) => [device.id, false])),
+    }));
+    setBulkBusy(false);
+    setBulkResult({ action: "session", succeeded, failed: selected.length - succeeded });
+  }
+
+  async function launchBulkGame(gameId: string, gameName: string) {
+    const selected = devices.filter((device) => selectedIds.has(device.id));
+    const eligible = selected.filter((device) => device.online);
+    setBulkBusy(true);
+    setBulkResult(null);
+    setBusy((current) => ({
+      ...current,
+      ...Object.fromEntries(selected.map((device) => [device.id, true])),
+    }));
+    setCardErrors((current) => {
+      const next = { ...current };
+      for (const device of selected) {
+        next[device.id] = device.online ? null : new ApiError(409, "headset offline");
+      }
+      return next;
+    });
+
+    const results = await Promise.all(eligible.map(async (device) => {
+      try {
+        const response = await launchGame(key, device.id, gameId);
+        setPending((current) => ({ ...current, [device.id]: response.commandId }));
+        return true;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) demandKey();
+        setCardErrors((current) => ({ ...current, [device.id]: error }));
+        return false;
+      }
+    }));
+    const succeeded = results.filter(Boolean).length;
+
+    setBusy((current) => ({
+      ...current,
+      ...Object.fromEntries(selected.map((device) => [device.id, false])),
+    }));
+    setBulkBusy(false);
+    setBulkResult({ action: "launch", gameName, succeeded, failed: selected.length - succeeded });
+  }
+
   if (keyRequired) {
     return (
       <main className="gate">
@@ -195,6 +289,22 @@ export function App() {
           </button>
         </div>
       )}
+      {devices.length > 0 && (
+        <BulkActions
+          selectedCount={selectedIds.size}
+          totalCount={devices.length}
+          games={games}
+          busy={bulkBusy}
+          result={bulkResult}
+          onSelectAll={() => setSelectedIds(new Set(devices.map((device) => device.id)))}
+          onClear={() => {
+            setSelectedIds(new Set());
+            setBulkResult(null);
+          }}
+          onStartSession={startBulkSession}
+          onLaunchGame={launchBulkGame}
+        />
+      )}
       <section className="board" aria-label={t.app.headsets}>
         {devices.map((d) => (
           <DeviceCard
@@ -206,6 +316,15 @@ export function App() {
             pendingCommandId={pending[d.id] ?? null}
             busy={!!busy[d.id]}
             error={cardErrors[d.id] != null ? friendlyError(cardErrors[d.id], t) : null}
+            selected={selectedIds.has(d.id)}
+            onSelectedChange={(deviceId, selected) => {
+              setSelectedIds((current) => {
+                const next = new Set(current);
+                if (selected) next.add(deviceId);
+                else next.delete(deviceId);
+                return next;
+              });
+            }}
             onLaunch={(deviceId, gameId) => runCardAction(deviceId, () => launchGame(key, deviceId, gameId))}
             onLaunchInstalled={(deviceId, packageName) =>
               runCardAction(deviceId, () => launchInstalledApp(key, deviceId, packageName))

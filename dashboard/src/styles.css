@@ -138,6 +138,31 @@ code {
 .shell { max-width: 1680px; margin: 0 auto; padding: 16px var(--gutter) 32px; }
 .board { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
 
+.bulk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-bay);
+  background: var(--bay);
+}
+.bulk-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.bulk-count { font-weight: 650; }
+.bulk-pick { display: flex; align-items: center; gap: 12px; }
+.bulk-body { display: grid; gap: 10px; width: 100%; padding-top: 12px; border-top: 1px solid var(--rail); }
+.bulk-action { display: grid; grid-template-columns: minmax(8rem, auto) minmax(8rem, 12rem) minmax(8rem, 12rem) auto; align-items: center; gap: 8px; }
+.bulk-action label { font-size: 0.875rem; font-weight: 650; }
+.bulk-action + .bulk-action { padding-top: 10px; border-top: 1px dashed var(--rail); }
+.bulk-minutes { min-width: 8rem; }
+.bulk-result { color: var(--chalk-dim); font-size: 0.875rem; }
+
+@media (max-width: 620px) {
+  .bulk-action { grid-template-columns: 1fr; }
+  .bulk-action .btn { width: 100%; }
+}
+
 .bay {
   --state: var(--idle);
   position: relative;
@@ -157,6 +182,7 @@ code {
 .bay[data-state="ending"], .bay[data-state="timeup"] { --state: var(--alert); }
 .bay[data-state="free"] { --state: var(--ready); }
 .bay[data-online="false"] { background: #141c26; }
+.bay[data-selected="true"] { border-color: var(--ready); box-shadow: inset 0 0 0 1px var(--ready); }
 /* The only ambient motion on the page: a session in its last minutes. */
 .bay[data-state="ending"]::before { animation: ending 1.6s ease-in-out infinite; }
 @keyframes ending { 50% { opacity: 0.25; } }
@@ -165,6 +191,9 @@ code {
 @keyframes arrive { from { box-shadow: 0 0 0 3px var(--state); } to { box-shadow: 0 0 0 3px transparent; } }
 
 .bay-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.bay-title { display: flex; align-items: center; min-width: 0; }
+.bay-select { display: grid; place-items: center; width: var(--tap); height: var(--tap); margin: -10px 2px -10px -10px; cursor: pointer; }
+.bay-select input { width: 20px; height: 20px; margin: 0; accent-color: var(--ready); cursor: pointer; }
 .bay-head h2 { font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
 .link-state { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--chalk-dim); white-space: nowrap; }
 .link-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }

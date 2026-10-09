@@ -12,6 +12,8 @@ export type DeviceCardProps = {
   pendingCommandId: string | null;
   busy: boolean;
   error: string | null;
+  selected?: boolean;
+  onSelectedChange?: (deviceId: string, selected: boolean) => void;
   onLaunch: (deviceId: string, gameId: string) => void;
   onLaunchInstalled: (deviceId: string, packageName: string) => void;
   onMapInstalled: (deviceId: string, packageName: string, name: string, metaAppId: string) => void;
@@ -229,10 +231,23 @@ export function DeviceCard(props: DeviceCardProps) {
       className="bay"
       data-state={state.kind}
       data-online={device.online}
+      data-selected={props.selected === true}
       aria-label={c.state(device.name, device.online)}
     >
       <header className="bay-head">
-        <h2>{device.name}</h2>
+        <div className="bay-title">
+          {props.onSelectedChange && (
+            <label className="bay-select">
+              <input
+                type="checkbox"
+                aria-label={c.selectLabel(device.name)}
+                checked={props.selected === true}
+                onChange={(event) => props.onSelectedChange?.(device.id, event.target.checked)}
+              />
+            </label>
+          )}
+          <h2>{device.name}</h2>
+        </div>
         <p className="link-state">{connection}</p>
       </header>
 
