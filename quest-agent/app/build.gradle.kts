@@ -6,20 +6,11 @@ plugins {
 }
 
 
-// Build-time setup defaults, read from the files the café PC already maintains so a
-// freshly installed headset needs no typing. Blank when a file is absent; Gradle
-// re-generates BuildConfig whenever one of these values changes.
+// Build-time setup default: CafeQuest's own Meta App ID from the café PC's
+// cafequest.config.json, so a freshly installed headset needs no typing. Blank
+// when the file is absent; Gradle re-generates BuildConfig when it changes. The
+// server address is not baked in: the agent finds it on the Wi-Fi (Discovery.kt).
 val repoRoot = rootProject.projectDir.parentFile
-
-fun envValue(key: String): String {
-    val file = File(repoRoot, ".env")
-    if (!file.isFile) return ""
-    return file.readLines()
-        .map(String::trim)
-        .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
-        .associate { it.substringBefore("=").trim() to it.substringAfter("=").trim() }[key]
-        ?: ""
-}
 
 fun configuredMetaAppId(): String {
     val file = File(repoRoot, "cafequest.config.json")
@@ -42,13 +33,10 @@ android {
         applicationId = "com.cafequest.agent"
         minSdk = 29
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "DEFAULT_SERVER_HOST", javaString(envValue("CAFE_PC_LAN_HOST").ifBlank { "192.168.1.50" }))
-        buildConfigField("int", "DEFAULT_SERVER_PORT", (envValue("PORT").toIntOrNull() ?: 3000).toString())
-        buildConfigField("String", "DEFAULT_ENROLLMENT_KEY", javaString(envValue("DEVICE_ENROLLMENT_KEY")))
         buildConfigField("String", "DEFAULT_META_APP_ID", javaString(configuredMetaAppId()))
     }
 

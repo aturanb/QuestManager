@@ -3,6 +3,9 @@ package com.cafequest.agent
 /** Sentinel the launcher treats as "no Meta Dashboard App ID configured yet". */
 const val UNCONFIGURED_APP_ID = "UNCONFIGURED"
 
+/** Port a Manual setup starts from; Auto learns the real one from the discovery reply. */
+const val DEFAULT_SERVER_PORT = 3000
+
 /** How the agent gets its server address (spec §4). */
 enum class ServerMode(val stored: String) {
     /** Found on the Wi-Fi, and followed when the café PC's IP changes. */
@@ -17,23 +20,13 @@ enum class ServerMode(val stored: String) {
 }
 
 /**
- * Values baked in at build time from the café PC's `.env` and
- * `cafequest.config.json` (see app/build.gradle.kts), so a freshly installed
- * headset needs no typing at all. Blank means "nothing was baked in".
+ * CafeQuest's own Meta App ID, baked in at build time from the café PC's
+ * `cafequest.config.json` (see app/build.gradle.kts). Blank means "nothing was
+ * baked in". The server address is not baked in: Auto finds it on the Wi-Fi.
  */
-data class AgentSetupDefaults(
-    val host: String,
-    val port: Int,
-    val enrollmentKey: String,
-    val metaAppId: String,
-) {
+data class AgentSetupDefaults(val metaAppId: String) {
     companion object {
-        fun fromBuildConfig(): AgentSetupDefaults = AgentSetupDefaults(
-            host = BuildConfig.DEFAULT_SERVER_HOST,
-            port = BuildConfig.DEFAULT_SERVER_PORT,
-            enrollmentKey = BuildConfig.DEFAULT_ENROLLMENT_KEY,
-            metaAppId = BuildConfig.DEFAULT_META_APP_ID,
-        )
+        fun fromBuildConfig(): AgentSetupDefaults = AgentSetupDefaults(metaAppId = BuildConfig.DEFAULT_META_APP_ID)
     }
 }
 
@@ -42,24 +35,29 @@ data class StoredSetup(
     val deviceName: String? = null,
     val serverHost: String? = null,
     val serverPort: String? = null,
-    val enrollmentKey: String? = null,
+    val serverMode: String? = null,
+    val serverName: String? = null,
     val metaAppId: String? = null,
 )
 
 /** Raw setup-screen fields, before trimming or validation. */
 data class AgentSetupInput(
     val deviceName: String,
+    val serverMode: ServerMode,
+    /** Manual only; ignored in Auto. */
     val serverHost: String,
+    /** Manual only; ignored in Auto. */
     val serverPort: String,
-    val enrollmentKey: String,
     val metaAppId: String,
+    /** The server picked after Find server; Auto only. */
+    val picked: FoundServer? = null,
 )
 
 private fun String?.orNullIfBlank(): String? = this?.takeIf { it.isNotBlank() }?.trim()
 
 private fun clampPort(port: Int): Int = port.coerceIn(1, 65535)
 
-/** What the agent runs with: stored values first, then the baked-in defaults. */
+/** What the agent runs with: stored values first, then the baked-in Meta App ID. */
 fun resolveIdentity(
     deviceId: String,
     stored: StoredSetup,
@@ -67,9 +65,10 @@ fun resolveIdentity(
 ): AgentIdentity = AgentIdentity(
     deviceId = deviceId,
     deviceName = stored.deviceName.orNullIfBlank() ?: "Quest ${deviceId.take(4).uppercase()}",
-    serverHost = stored.serverHost.orNullIfBlank() ?: defaults.host,
-    serverPort = stored.serverPort.orNullIfBlank()?.toIntOrNull()?.let(::clampPort) ?: clampPort(defaults.port),
-    enrollmentKey = stored.enrollmentKey.orNullIfBlank() ?: defaults.enrollmentKey,
+    serverHost = stored.serverHost.orNullIfBlank() ?: "",
+    serverPort = stored.serverPort.orNullIfBlank()?.toIntOrNull()?.let(::clampPort) ?: DEFAULT_SERVER_PORT,
+    serverMode = ServerMode.fromStored(stored.serverMode),
+    serverName = stored.serverName.orNullIfBlank(),
     metaAppId = stored.metaAppId.orNullIfBlank()?.takeUnless { it == UNCONFIGURED_APP_ID }
         ?: defaults.metaAppId.orNullIfBlank()
         ?: UNCONFIGURED_APP_ID,
@@ -77,14 +76,30 @@ fun resolveIdentity(
 
 /**
  * What a Save persists. A blank field keeps whatever is already stored: editing
- * the device name must never silently wipe the enrollment key or App ID, which
- * previously left the headset unable to enroll with nothing on screen to show it.
+ * the device name must never silently wipe the Meta App ID or a typed address.
+ * Manual takes the typed host and port; Auto takes a server picked after Find
+ * server, and coming back from Manual without a pick drops the typed address so
+ * the agent searches at once.
  */
-fun mergeSetup(current: AgentIdentity, input: AgentSetupInput): AgentIdentity = AgentIdentity(
-    deviceId = current.deviceId,
-    deviceName = input.deviceName.orNullIfBlank() ?: current.deviceName,
-    serverHost = input.serverHost.orNullIfBlank() ?: current.serverHost,
-    serverPort = input.serverPort.orNullIfBlank()?.toIntOrNull()?.let(::clampPort) ?: current.serverPort,
-    enrollmentKey = input.enrollmentKey.orNullIfBlank() ?: current.enrollmentKey,
-    metaAppId = input.metaAppId.orNullIfBlank() ?: current.metaAppId,
-)
+fun mergeSetup(current: AgentIdentity, input: AgentSetupInput): AgentIdentity {
+    val picked = input.picked
+    val server = when {
+        input.serverMode == ServerMode.MANUAL -> current.copy(
+            serverHost = input.serverHost.orNullIfBlank() ?: current.serverHost,
+            serverPort = input.serverPort.orNullIfBlank()?.toIntOrNull()?.let(::clampPort) ?: current.serverPort,
+        )
+        picked != null -> current.copy(serverHost = picked.host, serverPort = picked.port, serverName = picked.name)
+        current.serverMode == ServerMode.MANUAL -> current.copy(serverHost = "")
+        else -> current
+    }
+    return server.copy(
+        deviceName = input.deviceName.orNullIfBlank() ?: current.deviceName,
+        serverMode = input.serverMode,
+        metaAppId = input.metaAppId.orNullIfBlank() ?: current.metaAppId,
+    )
+}
+
+/** A server Auto found, applied to the stored setup; null when the setup is Manual (never overwrite a typed IP). */
+fun withDiscovered(current: AgentIdentity, found: FoundServer): AgentIdentity? =
+    if (current.serverMode == ServerMode.MANUAL) null
+    else current.copy(serverHost = found.host, serverPort = found.port, serverName = found.name)

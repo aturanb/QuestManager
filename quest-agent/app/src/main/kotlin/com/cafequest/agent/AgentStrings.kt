@@ -52,7 +52,6 @@ interface AgentStrings {
     val deviceName: String
     val serverHost: String
     val serverPort: String
-    val enrollmentKey: String
     val metaAppId: String
     val saveAndConnect: String
     val cancel: String
@@ -91,11 +90,10 @@ object EnglishStrings : AgentStrings {
     override val changeSetup = "Change setup"
 
     override val setupTitle = "Headset setup"
-    override val setupHint = "Filled in from the café PC's settings. A field left blank keeps its saved value."
+    override val setupHint = "A field left blank keeps its saved value."
     override val deviceName = "Device name"
     override val serverHost = "Server host"
     override val serverPort = "Server port"
-    override val enrollmentKey = "Enrollment key"
     override val metaAppId = "Meta App ID"
     override val saveAndConnect = "Save and connect"
     override val cancel = "Cancel"
@@ -137,11 +135,10 @@ object TurkishStrings : AgentStrings {
     override val changeSetup = "Kurulumu değiştir"
 
     override val setupTitle = "Gözlük kurulumu"
-    override val setupHint = "Kafe bilgisayarının ayarlarından dolduruldu. Boş bırakılan alan kayıtlı değerini korur."
+    override val setupHint = "Boş bırakılan alan kayıtlı değerini korur."
     override val deviceName = "Cihaz adı"
     override val serverHost = "Sunucu adresi"
     override val serverPort = "Sunucu portu"
-    override val enrollmentKey = "Kayıt anahtarı"
     override val metaAppId = "Meta App ID"
     override val saveAndConnect = "Kaydet ve bağlan"
     override val cancel = "İptal"

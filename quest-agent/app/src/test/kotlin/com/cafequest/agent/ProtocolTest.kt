@@ -10,6 +10,7 @@ class ProtocolTest {
         val json = protocolJson.encodeToString(h)
         assertTrue(json.contains("\"protocolVersion\":1"))
         assertTrue(json.contains("\"type\":\"hello\""))
+        assertFalse(json.contains("enrollmentKey"))
     }
 
     @Test fun `valid launch command parses, errors and unknown types return null`() {

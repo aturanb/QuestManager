@@ -241,9 +241,6 @@ fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> U
     var name by remember(identity) { mutableStateOf(identity?.deviceName ?: "") }
     var host by remember(identity) { mutableStateOf(identity?.serverHost ?: "") }
     var port by remember(identity) { mutableStateOf(identity?.serverPort?.toString() ?: "3000") }
-    // Prefilled, unlike before: a blank field used to be saved over the stored
-    // value, so renaming a headset silently wiped its enrollment key.
-    var enroll by remember(identity) { mutableStateOf(identity?.enrollmentKey ?: "") }
     var meta by remember(identity) { mutableStateOf(identity?.metaAppId?.takeUnless { it == UNCONFIGURED_APP_ID } ?: "") }
     Panel {
         Text(s.setupTitle, style = MaterialTheme.typography.headlineSmall)
@@ -255,16 +252,16 @@ fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> U
         SetupField(s.deviceName, name) { name = it }
         SetupField(s.serverHost, host) { host = it }
         SetupField(s.serverPort, port, KeyboardType.Number) { port = it }
-        SetupField(s.enrollmentKey, enroll) { enroll = it }
         SetupField(s.metaAppId, meta, KeyboardType.Number) { meta = it }
         Spacer(Modifier.height(4.dp))
         PrimaryAction(s.saveAndConnect) {
             scope.launch {
                 store.save(AgentSetupInput(
                     deviceName = name,
+                    // Until the Auto | Manual switch lands, the typed host is what the agent dials.
+                    serverMode = ServerMode.MANUAL,
                     serverHost = host,
                     serverPort = port,
-                    enrollmentKey = enroll,
                     metaAppId = meta,
                 ))
                 onSaved()

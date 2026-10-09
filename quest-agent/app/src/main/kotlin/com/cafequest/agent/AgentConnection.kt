@@ -108,7 +108,6 @@ class AgentConnection(
                     deviceName = identity.deviceName,
                     deviceModel = android.os.Build.MODEL ?: "Quest",
                     agentVersion = BuildConfig.VERSION_NAME,
-                    enrollmentKey = identity.enrollmentKey.ifBlank { null },
                 )
                 ws.send(protocolJson.encodeToString(hello))
                 scope.launch {

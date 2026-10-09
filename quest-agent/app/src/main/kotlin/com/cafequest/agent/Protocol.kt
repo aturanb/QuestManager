@@ -22,7 +22,6 @@ data class Hello(
     val deviceName: String,
     val deviceModel: String,
     val agentVersion: String,
-    val enrollmentKey: String? = null,
 )
 
 @Serializable
