@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_PACKAGE, resumableApp, shouldOfferResume } from "./resume-app";
+import { AGENT_PACKAGE, resumableApp } from "./resume-app";
 import type { Device } from "./types";
 
 function quest(over: Partial<Device> = {}): Device {
@@ -39,24 +39,5 @@ describe("resumableApp", () => {
     expect(resumableApp(quest({ usageAccessGranted: false }))).toBeNull();
     expect(resumableApp(quest({ online: false }))).toBeNull();
     expect(resumableApp(undefined)).toBeNull();
-  });
-});
-
-describe("shouldOfferResume", () => {
-  const beat = { packageName: "com.fun.beat", name: "Beat Saber" };
-
-  it("offers the remembered app when something else is in front", () => {
-    const cafequest = { packageName: AGENT_PACKAGE, name: "CafeQuest", startedAt: "2026-10-10T10:05:00.000Z" };
-    expect(shouldOfferResume(beat, quest({ foregroundApp: cafequest }))).toBe(true);
-    expect(shouldOfferResume(beat, quest({ foregroundApp: null }))).toBe(true);
-  });
-
-  it("stays quiet when the remembered app is already open, or nothing was remembered", () => {
-    expect(shouldOfferResume(beat, quest())).toBe(false);
-    expect(shouldOfferResume(null, quest({ foregroundApp: null }))).toBe(false);
-  });
-
-  it("stays quiet when the headset is gone", () => {
-    expect(shouldOfferResume(beat, undefined)).toBe(false);
   });
 });

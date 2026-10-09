@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { LiveViewModal, type LiveViewModalProps } from "./LiveViewModal";
 import { LangProvider } from "../i18n";
@@ -168,6 +168,90 @@ describe("LiveViewModal", () => {
     const video = screen.getByLabelText("Live screen of Quest 01") as HTMLVideoElement;
     expect(video.srcObject).toBe(stream);
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+  });
+
+  describe("full screen", () => {
+    const stream = { id: "remote-stream" } as unknown as MediaStream;
+    let fullscreenElement: Element | null = null;
+    let requestFullscreen: ReturnType<typeof vi.fn>;
+    let exitFullscreen: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fullscreenElement = null;
+      requestFullscreen = vi.fn(function (this: Element) {
+        fullscreenElement = this;
+        document.dispatchEvent(new Event("fullscreenchange"));
+        return Promise.resolve();
+      });
+      exitFullscreen = vi.fn(() => {
+        fullscreenElement = null;
+        document.dispatchEvent(new Event("fullscreenchange"));
+        return Promise.resolve();
+      });
+      Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreenElement });
+      Object.defineProperty(document, "exitFullscreen", { configurable: true, value: exitFullscreen });
+      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: requestFullscreen });
+    });
+
+    afterEach(() => {
+      for (const key of ["fullscreenEnabled", "fullscreenElement", "exitFullscreen"]) {
+        Reflect.deleteProperty(document, key);
+      }
+      Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+    });
+
+    it("shows the picture full screen and back, keeping the stream running", () => {
+      const p = props({ state: { phase: "live" }, stream });
+      render(<LiveViewModal {...p} />, { wrapper: LangProvider });
+
+      fireEvent.click(screen.getByRole("button", { name: "View the live screen of Quest 01 full screen" }));
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      const frame = requestFullscreen.mock.contexts[0] as HTMLElement;
+      expect(frame).toContainElement(screen.getByLabelText("Live screen of Quest 01"));
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit full screen" }));
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "View the live screen of Quest 01 full screen" })).toBeInTheDocument();
+      expect(p.onStop).not.toHaveBeenCalled();
+      expect(p.onClose).not.toHaveBeenCalled();
+    });
+
+    it("follows the browser leaving full screen on its own", () => {
+      render(<LiveViewModal {...props({ state: { phase: "live" }, stream })} />, { wrapper: LangProvider });
+      fireEvent.click(screen.getByRole("button", { name: "View the live screen of Quest 01 full screen" }));
+      expect(screen.getByRole("button", { name: "Exit full screen" })).toBeInTheDocument();
+
+      act(() => {
+        fullscreenElement = null;
+        document.dispatchEvent(new Event("fullscreenchange"));
+      });
+      expect(screen.getByRole("button", { name: "View the live screen of Quest 01 full screen" })).toBeInTheDocument();
+    });
+
+    it("does not close the viewer when Escape only leaves full screen", () => {
+      const p = props({ state: { phase: "live" }, stream });
+      render(<LiveViewModal {...p} />, { wrapper: LangProvider });
+      fireEvent.click(screen.getByRole("button", { name: "View the live screen of Quest 01 full screen" }));
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(p.onClose).not.toHaveBeenCalled();
+    });
+
+    it("is only offered with a live picture and where the browser supports it", () => {
+      const view = render(<LiveViewModal {...props({ state: { phase: "awaiting_approval" } })} />, { wrapper: LangProvider });
+      expect(screen.queryByRole("button", { name: /full screen/ })).not.toBeInTheDocument();
+      view.unmount();
+
+      Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: false });
+      render(<LiveViewModal {...props({ state: { phase: "live" }, stream })} />, { wrapper: LangProvider });
+      expect(screen.queryByRole("button", { name: /full screen/ })).not.toBeInTheDocument();
+    });
+
+    it("speaks Turkish", () => {
+      renderTurkish(<LiveViewModal {...props({ deviceName: "Quest 02", state: { phase: "live" }, stream })} />);
+      expect(screen.getByRole("button", { name: "Quest 02 canlı ekranını tam ekran yap" })).toHaveTextContent("Tam ekran");
+    });
   });
 
   it("asks staff to have the customer approve on the headset", () => {

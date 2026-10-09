@@ -30,7 +30,7 @@ import { LiveViewModal } from "./components/LiveViewModal";
 import { ResumeAppPrompt } from "./components/ResumeAppPrompt";
 import { SelectionBar } from "./components/SelectionBar";
 import { castRequestError, friendlyError } from "./errors";
-import { resumableApp, shouldOfferResume, type ResumeApp } from "./resume-app";
+import { resumableApp, type ResumeApp } from "./resume-app";
 import { useI18n } from "./i18n";
 
 const KEY_STORAGE = "cq-admin-key";
@@ -47,7 +47,7 @@ type ActiveLiveView = {
   stream: MediaStream | null;
 };
 
-/** Asked once after staff end a live view whose app is no longer in front. */
+/** Asked once after staff end a live view that had a customer app open. */
 type ResumePrompt = { deviceId: string; deviceName: string; app: ResumeApp };
 
 export type AppProps = {
@@ -267,16 +267,17 @@ export function App({ castFactory }: AppProps = {}) {
     if (app) resumeAppRef.current = app;
   }, [devices, liveDeviceId]);
 
-  /** Staff ended the stream: close it, then offer to bring the customer's app back. */
+  /**
+   * Staff ended the stream: close it, then offer to bring the customer's app back.
+   * Always asked, never inferred from "is it in front": Quest keeps a game
+   * resumed behind CafeQuest's consent panels, so usage stats cannot tell.
+   */
   const endLiveView = useCallback(() => {
     if (!liveView) return;
-    const device = devices.find((d) => d.id === liveView.deviceId);
     const resume = resumeAppRef.current;
     closeLiveView();
-    if (resume && shouldOfferResume(resume, device)) {
-      setResumePrompt({ deviceId: liveView.deviceId, deviceName: liveView.deviceName, app: resume });
-    }
-  }, [liveView, devices, closeLiveView]);
+    if (resume) setResumePrompt({ deviceId: liveView.deviceId, deviceName: liveView.deviceName, app: resume });
+  }, [liveView, closeLiveView]);
 
   const retryLiveView = useCallback(() => {
     const current = liveView;

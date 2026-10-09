@@ -688,13 +688,17 @@ describe("App", () => {
       expect(screen.getByRole("alertdialog")).toHaveTextContent("Reopen Cook Out on Quest 01?");
     });
 
-    it("stays quiet when the app is still in front, or nothing but CafeQuest was open", async () => {
-      const first = await startLive(BEAT);
+    it("still asks when the app is reported in front, because Quest keeps a game resumed behind panels", async () => {
+      // Observed on a Quest 3: consent screens resumed and paused over a game that never got ACTIVITY_PAUSED.
+      const { board } = await startLive(BEAT);
       fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
-      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-      expect(first.board.launchCalls()).toHaveLength(0);
-      cleanup();
 
+      const prompt = screen.getByRole("alertdialog", { name: "Live view ended" });
+      expect(prompt).toHaveTextContent("Reopen Beat Saber on Quest 01?");
+      expect(board.launchCalls()).toHaveLength(0);
+    });
+
+    it("stays quiet when nothing but CafeQuest was open", async () => {
       await startLive(CAFEQUEST);
       fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();

@@ -383,7 +383,7 @@ input::placeholder { color: var(--chalk-dim); }
   z-index: 20;
   display: grid;
   gap: 14px;
-  width: min(560px, calc(100vw - 2 * var(--gutter)));
+  width: min(880px, calc(100vw - 2 * var(--gutter)));
   max-height: calc(100vh - 2 * var(--gutter));
   overflow: auto;
   padding: 22px;
@@ -405,7 +405,20 @@ input::placeholder { color: var(--chalk-dim); }
 .cast-phase[data-phase="failed"]::before { background: var(--alert); }
 .cast-content { display: grid; gap: 14px; }
 .cast-body { color: var(--chalk-dim); }
-.cast-video { position: relative; aspect-ratio: 16 / 9; border: 1px solid var(--rail); border-radius: var(--r-ctl); background: #000; overflow: hidden; }
+.cast-video {
+  position: relative;
+  /* As wide as the panel allows, but never taller than the screen can hold with the controls around it. */
+  width: min(100%, max(320px, calc((100vh - 430px) * 16 / 9)));
+  margin-inline: auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-ctl);
+  background: #000;
+  overflow: hidden;
+}
+.cast-video:fullscreen { width: 100vw; margin: 0; border: 0; border-radius: 0; aspect-ratio: auto; }
+.cast-fullscreen { position: absolute; right: 10px; top: 10px; background: rgba(0, 0, 0, 0.62); opacity: 0.85; }
+.cast-fullscreen:hover, .cast-fullscreen:focus-visible { opacity: 1; }
 .cast-video video { width: 100%; height: 100%; object-fit: contain; }
 .cast-video .note { position: absolute; inset: auto 10px 10px 10px; margin: 0; }
 .cast-controls { justify-content: flex-end; }

@@ -12,9 +12,3 @@ export function resumableApp(device: Device | undefined): ResumeApp | null {
   if (!app || app.packageName === AGENT_PACKAGE) return null;
   return { packageName: app.packageName, name: app.name };
 }
-
-/** Ask only when the remembered app is not already in front, so a game that stayed open never nags. */
-export function shouldOfferResume(resume: ResumeApp | null, device: Device | undefined): boolean {
-  if (!resume || !device) return false;
-  return device.foregroundApp?.packageName !== resume.packageName;
-}

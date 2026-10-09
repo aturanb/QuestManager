@@ -40,6 +40,8 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [noPicture, setNoPicture] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const contentId = useId();
 
   // Minimizing unmounts the <video>, so expanding must attach the stream to the new element.
@@ -72,14 +74,28 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
     return () => clearTimeout(timer);
   }, [state.phase, stream]);
 
-  // Escape closes the viewer, which stops the stream in App.
+  // The browser owns leaving full screen (Escape, its own UI); mirror it in the button.
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === frameRef.current && frameRef.current !== null);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // Escape closes the viewer, which stops the stream in App. While full screen it only leaves full screen.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !document.fullscreenElement) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  const canFullscreen = document.fullscreenEnabled === true;
+  function toggleFullscreen() {
+    // A refused or interrupted request just leaves the picture where it was.
+    if (document.fullscreenElement) void Promise.resolve(document.exitFullscreen()).catch(() => undefined);
+    else void Promise.resolve(frameRef.current?.requestFullscreen()).catch(() => undefined);
+  }
 
   const phaseWord =
     state.phase === "connecting"
@@ -132,9 +148,18 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
             <p className="cast-body">{body}</p>
 
             {state.phase === "live" && (
-              <div className="cast-video">
+              <div className="cast-video" ref={frameRef}>
                 {/* eslint-disable-next-line jsx-a11y/media-has-caption -- live video has no audio track */}
                 <video ref={videoRef} autoPlay muted playsInline aria-label={t.cast.videoLabel(deviceName)} />
+                {canFullscreen && (
+                  <button
+                    className="btn cast-fullscreen"
+                    aria-label={fullscreen ? t.cast.exitFullscreen : t.cast.fullscreenLabel(deviceName)}
+                    onClick={toggleFullscreen}
+                  >
+                    {fullscreen ? t.cast.exitFullscreen : t.cast.fullscreen}
+                  </button>
+                )}
                 {noPicture && (
                   <p className="note" data-tone="wait" role="status">
                     {t.cast.noPicture}

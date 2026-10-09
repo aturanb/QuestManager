@@ -123,14 +123,17 @@ Put a managed game in the foreground, then:
 10. Refuse consent once (row 30) and let one request time out by tapping nothing
    for a minute (row 31): the dashboard must show the failure instead of a stuck
    spinner, and the next request asks for consent again.
-11. Launch and reopen, from the dashboard viewer: while live, pick an app in the
-    viewer's **Launch an app** list and press Launch (the stream must keep running
-    and the card shows the usual launch status). Minimize and expand the viewer: the
-    picture must come back, not stay black. Then press **Stop live view** while
-    CafeQuest, not the game, is in front (the manual-button flow): a prompt must
-    offer to reopen the app that was open before (or the one staff launched last),
-    and **Yes, open it** must bring it to the front. No prompt is expected when that
-    app is still in front. UNVERIFIED_HARDWARE.
+11. Launch, reopen and full screen, from the dashboard viewer: while live, pick
+    an app in the viewer's **Launch an app** list and press Launch (the stream must
+    keep running and the card shows the usual launch status). Minimize and expand
+    the viewer: the picture must come back, not stay black. Press **Full screen**
+    on the picture: it must fill the display, Escape must leave full screen without
+    closing the viewer, and the stream must keep running. Then press **Stop live
+    view**: a prompt must offer to reopen the app that was open before (or the one
+    staff launched last), and **Yes, open it** must bring it to the front. The
+    prompt is asked every time, even if "Şu an açık" still shows the game: Quest
+    keeps a game "resumed" behind CafeQuest's consent screens, so usage stats cannot
+    say whether it is really in front. UNVERIFIED_HARDWARE.
 12. Repeat 2–5 with two more apps, including a 2D panel app (row 32). A black
     frame means that title sets `FLAG_SECURE`; nothing can be changed from the
     CafeQuest side, so record it as-is.
