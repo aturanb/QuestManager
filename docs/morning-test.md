@@ -90,6 +90,21 @@ the café PC. Use a stopwatch for the timed rows and record real numbers in
 | 38 | Duplicate-device replacement: with a session Live, force a second connection for the same device id (restart the agent) → the old session ends and the slot is free | |
 | 39 | App restart: start a session, then force-stop and reopen CafeQuest → projection stops and the dashboard slot frees within seconds | |
 
+## Optional: controller batteries
+
+Do these rows with the **Controller batteries** switch on and one headset whose
+TCP ADB was prepared over USB (`adb tcpip 5555`, see docs/quest-setup.md).
+
+| # | Check | PASS / FAIL |
+|---|---|---|
+| 40 | Switch on → within ~1 minute the card shows `L`/`R` badges. Compare both numbers with `adb -s <ip>:5555 shell dumpsys OVRRemoteService` | |
+| 41 | Sleep one controller (set it down until it turns off) → its badge keeps the percentage and says `last known`; wake it and the next cycle drops the label | |
+| 42 | Switch off → badges disappear from every card; **Online**, session buttons, and launch keep working | |
+| 43 | `adb disconnect <ip>:5555` mid-session → only the badges go to `L — R —`; the headset stays Online, and its session and a game launch still work | |
+| 44 | With monitoring on, rename `adb` (or set `ADB_PATH` to a wrong path in `.env`) and restart the server → the switch stays on and reports *ADB unavailable*; restore it and readings come back without re-toggling | |
+| 45 | Restart the server while monitoring is on → the switch is still on but no old readings are shown; fresh badges appear within a cycle | |
+| 46 | Reboot the headset → after it reconnects, badges show either fresh values or an ADB reason; run `adb tcpip 5555` again over USB and confirm they return | |
+
 ## Troubleshooting
 
 - **ADB empty**: developer mode, USB RSA prompt, cable/port.
@@ -116,5 +131,9 @@ the café PC. Use a stopwatch for the timed rows and record real numbers in
 - **`Request live view` refused**: another session is already Live (`busy`), the
   headset is Offline, or the APK is older than 0.5.0 and does not advertise
   `screen_cast_v1`.
+- **Controller badges missing**: the switch is off, or the headset has no
+  wireless ADB address (`adb tcpip 5555` was never run, or the headset rebooted
+  since). Badges with `L — R —` say why; they never affect anything else on the
+  card.
 
 Record every result in `docs/poc-test-results.md` — never pre-mark PASS.

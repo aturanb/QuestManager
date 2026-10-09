@@ -60,8 +60,8 @@ code {
   top: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "brand summary feed lang";
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "brand summary feed controller lang";
   align-items: center;
   gap: 10px 24px;
   padding: 12px var(--gutter);
@@ -111,6 +111,52 @@ code {
 .feed[data-live="true"] { color: var(--chalk); }
 .feed[data-live="true"]::before { background: var(--ready); }
 
+/* Optional controller-battery monitoring: one global switch, off by default. */
+.controller-toggle { grid-area: controller; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.controller-copy { display: grid; gap: 2px; min-width: 0; }
+.controller-label { font-size: 0.8125rem; font-weight: 700; color: var(--chalk-dim); white-space: nowrap; }
+.controller-toggle[data-enabled="true"] .controller-label { color: var(--chalk); }
+.controller-status { font-size: 0.75rem; color: var(--chalk-dim); white-space: nowrap; }
+.controller-error { font-size: 0.75rem; font-weight: 600; color: var(--alert); }
+/* A switch, not a checkbox: keyboard operable and state exposed via aria-checked. */
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--rail);
+  border-radius: 999px;
+  background: var(--raised);
+  cursor: pointer;
+}
+.switch[aria-checked="true"] { border-color: var(--ready); background: color-mix(in srgb, var(--ready) 25%, var(--raised)); }
+.switch:disabled { opacity: 0.5; cursor: progress; }
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--chalk-dim);
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+.switch[aria-checked="true"] .switch-knob { transform: translateX(20px); background: var(--ready); }
+
+/* Screen-reader-only helper text (the switch's aria-describedby target). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Board language: two-way switch, pressed side is live. Remembered per browser. */
 .lang { grid-area: lang; display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--rail); border-radius: var(--r-ctl); }
 .lang button {
@@ -131,7 +177,11 @@ code {
 .lang button[aria-pressed="true"] { background: var(--raised); color: var(--chalk); }
 
 @media (max-width: 719px) {
-  .topbar { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "brand feed lang" "summary summary summary"; }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "brand feed lang" "controller controller controller" "summary summary summary";
+  }
+  .controller-toggle { flex-wrap: wrap; }
 }
 
 /* ---- the board ------------------------------------------------------------ */
@@ -201,6 +251,25 @@ code {
 .battery[data-tone="low"] { --cell: var(--alert); }
 .battery[data-tone="low"] .pct { color: var(--alert); }
 .charging { font-size: 0.8125rem; font-weight: 400; color: var(--chalk-dim); }
+
+/* Controller badges sit inside the battery cell: compact, and never colour-only. */
+.controllers { display: inline-flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; margin-left: 8px; }
+.controller-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--rail);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--chalk);
+  white-space: nowrap;
+}
+/* Last known: a sleeping controller keeps its number, dimmed and labelled. */
+.controller-badge[data-state="inactive"],
+.controller-badge[data-state="stale"],
+.controller-badge[data-state="unavailable"] { color: var(--chalk-dim); }
+.controller-badge[data-state="stale"] { border-style: dashed; }
+.controller-last { margin-left: 4px; font-weight: 500; font-size: 0.6875rem; }
+.controller-updated { font-size: 0.75rem; color: var(--chalk-dim); white-space: nowrap; }
 
 /* ---- controls ------------------------------------------------------------- */
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -1,4 +1,4 @@
-import type { Device, Game, Snapshot } from "./types";
+import type { ControllerBatteryMonitoringState, Device, Game, Snapshot } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -97,6 +97,20 @@ export function requestCast(key: string, deviceId: string): Promise<{ sessionId:
   return apiFetch("/api/casts", key, { method: "POST", body: JSON.stringify({ deviceId }) });
 }
 
+/**
+ * The global controller-battery switch. It controls CafeQuest's own ADB
+ * collection only: it never enables or disables headset Wireless Debugging.
+ */
+export function setControllerBatteryMonitoring(
+  key: string,
+  enabled: boolean
+): Promise<{ controllerBatteryMonitoring: ControllerBatteryMonitoringState }> {
+  return apiFetch("/api/settings/controller-battery-monitoring", key, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 /** Idempotent: 204 whether the session is active, terminal, or already gone. */
 export function stopCast(key: string, sessionId: string): Promise<void> {
   return apiFetch(`/api/casts/${encodeURIComponent(sessionId)}`, key, { method: "DELETE" });
@@ -130,4 +144,4 @@ export function connectStateSocket(
   return { socket, close: () => socket.close() };
 }
 
-export type { Device, Game, Snapshot };
+export type { ControllerBatteryMonitoringState, Device, Game, Snapshot };

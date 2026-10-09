@@ -1,5 +1,10 @@
 import type { ReactNode } from "react";
-import type { CastFailureCode, CastRequestError } from "./types";
+import type {
+  CastFailureCode,
+  CastRequestError,
+  ControllerBatteryAvailability,
+  ControllerBatteryReason,
+} from "./types";
 
 export type Lang = "en" | "tr";
 
@@ -196,6 +201,41 @@ const en = {
       CAST_BUSY: "Another live view is already running. Stop it first.",
       REQUEST_FAILED: "Couldn't start the live view.",
     } satisfies Record<CastFailureCode | CastRequestError, string>,
+  },
+  // Optional controller diagnostics. "Off" stops CafeQuest's own ADB reads; it
+  // never claims to change Wireless Debugging inside Horizon OS.
+  controller: {
+    label: "Controller batteries",
+    switchLabel: "Controller battery monitoring",
+    help:
+      "Reads the left and right Touch controller levels over wireless ADB. Off stops CafeQuest reading them; it does not change Wireless Debugging on the headsets.",
+    pending: "Saving…",
+    error: "Couldn't change controller battery monitoring.",
+    ready: "ADB ready",
+    availability: {
+      ready: "ADB ready",
+      adb_unavailable: "ADB unavailable",
+      no_devices: "Waiting for a headset",
+      disabled: "Off",
+    } satisfies Record<ControllerBatteryAvailability, string>,
+    left: "L",
+    right: "R",
+    leftWord: "Left",
+    rightWord: "Right",
+    group: (name: string) => `Controller batteries for ${name}`,
+    lastKnown: "last known",
+    updated: (ago: string) => `Updated ${ago}`,
+    reading: (side: string, level: number) => `${side} controller ${level}%`,
+    readingLastKnown: (side: string, level: number) => `${side} controller ${level}%, last known`,
+    unavailable: (side: string) => `${side} controller battery unavailable`,
+    waiting: "Waiting for a reading",
+    reasons: {
+      headset_offline: "The headset is not connected",
+      no_wireless_address: "No wireless ADB address for this headset",
+      adb_connect_failed: "Couldn't connect to the headset over ADB",
+      dump_failed: "The headset didn't answer the controller query",
+      parse_failed: "The controller reading was in an unknown format",
+    } satisfies Record<NonNullable<ControllerBatteryReason>, string>,
   },
   errors: {
     // Server error codes, in the words staff need at the counter.
@@ -401,6 +441,39 @@ const tr: Messages = {
       CAST_UNSUPPORTED: "Canlı görüntü için bu gözlükteki CafeQuest aracısını güncelleyin.",
       CAST_BUSY: "Zaten bir canlı görüntü çalışıyor. Önce onu durdurun.",
       REQUEST_FAILED: "Canlı görüntü başlatılamadı.",
+    },
+  },
+  controller: {
+    label: "Kontrolcü pilleri",
+    switchLabel: "Kontrolcü pili izleme",
+    help:
+      "Sol ve sağ Touch kontrolcü seviyelerini kablosuz ADB üzerinden okur. Kapalıyken CafeQuest okumayı durdurur; gözlüklerdeki Kablosuz Hata Ayıklama ayarını değiştirmez.",
+    pending: "Kaydediliyor…",
+    error: "Kontrolcü pili izleme değiştirilemedi.",
+    ready: "ADB hazır",
+    availability: {
+      ready: "ADB hazır",
+      adb_unavailable: "ADB kullanılamıyor",
+      no_devices: "Gözlük bekleniyor",
+      disabled: "Kapalı",
+    },
+    left: "L",
+    right: "R",
+    leftWord: "Sol",
+    rightWord: "Sağ",
+    group: (name) => `${name} için kontrolcü pilleri`,
+    lastKnown: "son bilinen",
+    updated: (ago) => `Güncellendi: ${ago}`,
+    reading: (side, level) => `${side} kontrolcü %${level}`,
+    readingLastKnown: (side, level) => `${side} kontrolcü %${level}, son bilinen`,
+    unavailable: (side) => `${side} kontrolcü pili kullanılamıyor`,
+    waiting: "Okuma bekleniyor",
+    reasons: {
+      headset_offline: "Gözlük bağlı değil",
+      no_wireless_address: "Bu gözlük için kablosuz ADB adresi yok",
+      adb_connect_failed: "Gözlüğe ADB ile bağlanılamadı",
+      dump_failed: "Gözlük kontrolcü sorgusunu yanıtlamadı",
+      parse_failed: "Kontrolcü okuması bilinmeyen bir biçimde geldi",
     },
   },
   errors: {

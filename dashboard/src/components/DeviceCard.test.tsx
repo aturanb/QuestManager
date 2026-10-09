@@ -14,7 +14,8 @@ function device(over: Partial<Device> = {}): Device {
     id: "d1", name: "Quest 01", model: "Quest 3", agentVersion: "0.1.0",
     lastSeenAt: new Date(999_000).toISOString(), batteryLevel: 82, charging: false,
     expectedGame: null, usageAccessGranted: null, foregroundApp: null,
-    online: true, session: null, lastCommand: null, installedApps: [], supportsScreenCast: false, ...over,
+    online: true, session: null, lastCommand: null, installedApps: [], supportsScreenCast: false,
+    controllerBattery: null, ...over,
   };
 }
 
@@ -487,5 +488,153 @@ describe("DeviceCard in Turkish", () => {
     const button = screen.getByRole("button", { name: "Quest 01 için canlı görüntü iste" });
     fireEvent.click(button);
     expect(p.onRequestCast).toHaveBeenCalledWith("d1");
+  });
+});
+
+describe("DeviceCard controller batteries", () => {
+  const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+
+  it("shows nothing extra while controller monitoring is off", () => {
+    render(<DeviceCard {...props()} />);
+    expect(screen.queryByRole("group", { name: /controller batteries/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("L")).not.toBeInTheDocument();
+    expect(screen.getByText("82%")).toBeInTheDocument();
+  });
+
+  it("shows compact left and right readings beside the headset battery", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: {
+          left: { level: 100, state: "active" },
+          right: { level: 80, state: "active" },
+          observedAt: at(30_000),
+          status: "available",
+          reason: null,
+        },
+      }),
+    })} />);
+    const group = screen.getByRole("group", { name: "Controller batteries for Quest 01" });
+    expect(group).toBeInTheDocument();
+    expect(group).toHaveTextContent("L 100%");
+    expect(group).toHaveTextContent("R 80%");
+    // The headset battery is untouched by the extra badges.
+    expect(screen.getByText("82%")).toBeInTheDocument();
+  });
+
+  it("keeps an inactive controller's percentage and marks it last known", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: {
+          left: { level: 100, state: "active" },
+          right: { level: 80, state: "inactive" },
+          observedAt: at(30_000),
+          status: "available",
+          reason: null,
+        },
+      }),
+    })} />);
+    expect(screen.getByLabelText("Right controller 80%, last known")).toHaveTextContent("R 80%");
+    expect(screen.getByText("last known")).toBeInTheDocument();
+    expect(screen.getByLabelText("Left controller 100%")).not.toHaveTextContent("last known");
+  });
+
+  it("keeps the last values with their time when a cycle fails, and says they are stale", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: {
+          left: { level: 95, state: "inactive" },
+          right: { level: 75, state: "inactive" },
+          observedAt: at(4 * 60_000),
+          status: "stale",
+          reason: "dump_failed",
+        },
+      }),
+    })} />);
+    expect(screen.getByText("Updated 4 min ago")).toBeInTheDocument();
+    const left = screen.getByLabelText("Left controller 95%, last known");
+    expect(left).toHaveAttribute("data-state", "stale");
+    expect(left).toHaveTextContent("L 95%");
+    expect(left).toHaveTextContent("last known");
+  });
+
+  it("renders — with a translated reason when there is no reading at all", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "adb_connect_failed" },
+      }),
+    })} />);
+    const group = screen.getByRole("group", { name: "Controller batteries for Quest 01" });
+    expect(group.textContent?.replace(/\s+/g, " ")).toContain("L —");
+    expect(group.textContent?.replace(/\s+/g, " ")).toContain("R —");
+    expect(group).not.toHaveTextContent(/Updated/);
+    expect(screen.getByLabelText("Left controller battery unavailable")).toHaveAttribute(
+      "title",
+      "Couldn't connect to the headset over ADB"
+    );
+  });
+
+  it("says a headset with no wireless address needs no raw ADB detail", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "no_wireless_address" },
+      }),
+    })} />);
+    expect(screen.getByLabelText("Right controller battery unavailable")).toHaveAttribute(
+      "title",
+      "No wireless ADB address for this headset"
+    );
+  });
+
+  it("keeps the existing headset controls enabled while readings are shown", () => {
+    const p = props({
+      device: device({
+        supportsScreenCast: true,
+        session: { id: "s1", startedAt: at(60_000), endsAt: at(-30 * 60_000), status: "active" },
+        controllerBattery: {
+          left: { level: 100, state: "active" },
+          right: { level: 80, state: "active" },
+          observedAt: at(30_000),
+          status: "available",
+          reason: null,
+        },
+      }),
+      onStop: vi.fn(),
+    });
+    render(<DeviceCard {...p} />);
+    expect(screen.getByRole("button", { name: /stop session/i })).toBeEnabled();
+    const stop = screen.getByRole("button", { name: /stop session/i });
+    fireEvent.click(stop);
+    expect(p.onStop).toHaveBeenCalledWith("s1");
+  });
+
+  it("speaks Turkish for controller badges and their last-known state", () => {
+    renderTurkish(<DeviceCard {...props({
+      device: device({
+        controllerBattery: {
+          left: { level: 100, state: "active" },
+          right: { level: 80, state: "inactive" },
+          observedAt: at(4 * 60_000),
+          status: "stale",
+          reason: "dump_failed",
+        },
+      }),
+    })} />);
+    expect(screen.getByRole("group", { name: "Quest 01 için kontrolcü pilleri" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Sağ kontrolcü %80, son bilinen")).toHaveTextContent("R 80%");
+    // A stale cycle marks both hands last-known.
+    expect(screen.getAllByText("son bilinen")).toHaveLength(2);
+    expect(screen.getByText("Güncellendi: 4 dk önce")).toBeInTheDocument();
+  });
+
+  it("translates an unavailable controller in Turkish too", () => {
+    renderTurkish(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "parse_failed" },
+      }),
+    })} />);
+    expect(screen.getByLabelText("Sol kontrolcü pili kullanılamıyor")).toHaveAttribute(
+      "title",
+      "Kontrolcü okuması bilinmeyen bir biçimde geldi"
+    );
   });
 });

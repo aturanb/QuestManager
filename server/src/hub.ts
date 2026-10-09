@@ -27,6 +27,7 @@ import {
 import type { AppCatalog } from "./catalog.js";
 import { isIgnoredPackage, resolveInstalledApp } from "./installed-apps.js";
 import { CastCoordinator } from "./cast-coordinator.js";
+import { normalizeRemoteIpv4, type CollectorTarget, type ControllerBatteryView } from "./controller-battery.js";
 
 export const OFFLINE_MS = 15_000;
 export const COMMAND_TIMEOUT_MS = 10_000;
@@ -37,7 +38,13 @@ export const AGENT_WS_PATH = "/agent-ws";
 export const DASHBOARD_WS_PATH = "/dashboard-ws";
 export const CAST_WS_PATH = "/cast-ws";
 
-type DeviceConn = { socket: WebSocket; deviceId: string; capabilities: ReadonlySet<AgentCapability> };
+type DeviceConn = {
+  socket: WebSocket;
+  deviceId: string;
+  capabilities: ReadonlySet<AgentCapability>;
+  /** Normalized LAN IPv4 of the socket, in memory only; null when not pollable. */
+  remoteAddress: string | null;
+};
 type LaunchTarget =
   | { gameId: string; name: string; metaAppId: string; packageName?: never }
   | { gameId: string; name: string; packageName: string; metaAppId?: never };
@@ -59,6 +66,8 @@ export class Hub {
   private log: FastifyInstance["log"];
   /** The single in-memory live-view session; no SQL, no signaling storage. */
   readonly cast: CastCoordinator;
+  /** Optional diagnostics view; null while controller monitoring is not wired. */
+  private controllerBattery: ControllerBatteryView | null = null;
 
   constructor(
     private fastify: FastifyInstance,
@@ -100,7 +109,25 @@ export class Hub {
     return this.devices.has(id);
   }
 
-  addAgentSocket(deviceId: string, socket: WebSocket, capabilities: readonly AgentCapability[] = []): void {
+  /**
+   * Attach the optional controller-battery view. Deliberately a setter: the
+   * collector needs hub targets, and the hub needs the collector's state.
+   */
+  setControllerBatteryView(view: ControllerBatteryView | null): void {
+    this.controllerBattery = view;
+  }
+
+  /** Live connection addresses for the optional ADB collector; never persisted. */
+  controllerBatteryTargets(): readonly CollectorTarget[] {
+    return [...this.devices.values()].map((conn) => ({ deviceId: conn.deviceId, address: conn.remoteAddress }));
+  }
+
+  addAgentSocket(
+    deviceId: string,
+    socket: WebSocket,
+    capabilities: readonly AgentCapability[] = [],
+    remoteAddress?: string
+  ): void {
     const prev = this.devices.get(deviceId);
     if (prev && prev.socket !== socket) {
       // A replacement connection must never inherit a live view bound to the old socket.
@@ -114,7 +141,12 @@ export class Hub {
       }
       this.log.warn({ device: deviceId }, "duplicate connection replaced");
     }
-    this.devices.set(deviceId, { socket, deviceId, capabilities: new Set(capabilities) });
+    this.devices.set(deviceId, {
+      socket,
+      deviceId,
+      capabilities: new Set(capabilities),
+      remoteAddress: normalizeRemoteIpv4(remoteAddress),
+    });
     this.onDeviceChanged();
     this.pushDashboardState();
   }
@@ -372,8 +404,14 @@ export class Hub {
           lastCommand: lastCommand ? { id: lastCommand.id, status: lastCommand.status, error: lastCommand.error } : null,
           installedApps,
           supportsScreenCast: this.supportsScreenCast(d.id),
+          // Only while monitoring is on; readings are in memory, never SQLite.
+          controllerBattery: this.controllerBattery?.deviceState(d.id) ?? null,
         };
       }),
+      controllerBatteryMonitoring: this.controllerBattery?.monitoringState() ?? {
+        enabled: false,
+        availability: "disabled" as const,
+      },
     };
   }
 

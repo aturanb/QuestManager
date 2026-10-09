@@ -1,5 +1,67 @@
 # CafeQuest POC Results
 
+## Optional controller batteries, 2026-10-09
+
+Quest model: Quest 3 (adb serial `2G0YC5ZG8106W2`), Horizon OS on Android 14
+Server version: 0.1.0
+
+### Automated verification (all run on this Mac)
+
+| Check | Result | Notes |
+|---|---|---|
+| `npm test` | PASS | shared 28, server 130, simulator 11, dashboard 199 — 0 failures |
+| `npm run build` | PASS | shared + server + simulator + dashboard |
+| `npx tsc -p tsconfig.json` | PASS | whole-repo typecheck, no errors |
+| `./gradlew testDebugUnitTest` (JDK 21) | PASS | 132 JVM tests: the Android agent was not touched by this feature |
+| `git diff --check` | PASS | silent |
+| Parser fixture | PASS | The two real `Paired device` lines from this Quest 3 (`Right` 80%, `Left` 100%, both `Status: Disabled`) parse to left 100/inactive, right 80/inactive |
+| No real `adb` in tests | PASS | Every test injects a fake runner; only `ADB_PATH`/`adb` at runtime |
+
+### Stub-`adb` end-to-end check (not a headset test)
+
+The collector was run against a stand-in `adb` (`ADB_PATH`) that answers
+`version`, `connect`, `disconnect` and returns the two real `Paired device`
+lines above for `dumpsys OVRRemoteService`. Targets were two simulated headsets
+(`npm run simulator -- --count 2 --stable --url <café PC LAN IP>`)
+whose sockets arrive from the Mac's own LAN IPv4, so address matching, the
+one-minute cycle, the API and the dashboard rendering were exercised for real —
+only the `adb` binary is fake.
+
+| Check | Result | Notes |
+|---|---|---|
+| Monitoring off → `controllerBattery: null` | PASS | Cards keep the headset battery only |
+| `PUT /api/settings/controller-battery-monitoring {"enabled":true}` | PASS | Returns `{enabled:true, availability:"ready"}`; a cycle then records readings |
+| One cycle per minute, no overlap | PASS | `version` → `connect <ip>:5555` → `dumpsys OVRRemoteService`, 60.0 s apart; a cycle that starts with no agent reports `no_devices`, the next one `ready` |
+| Readings in the real snapshot | PASS | Both online headsets left 100/`active`, right 80/`inactive`; the six offline rows `unavailable`/`headset_offline` |
+| Header switch and card badges | PASS | `role="switch"` named *Controller battery monitoring*, position from the server; online card shows `L 100%` and `R 80%` with the accessible *last known*, offline cards `L —`; inactive/unavailable use a subdued color **and** ARIA text |
+| Clicking the switch off then on | PASS | Off removes all 16 badges and every per-card controller group; on restores them with a fresh timestamp; no horizontal overflow at 1280×900 or 390×844 |
+| Turkish copy | PASS | *Kontrolcü pili izleme*, *Quest 01 için kontrolcü pilleri*, `son bilinen`, `Güncellendi: 25 sn önce` |
+| Setting survives a restart | PASS | Second boot logs *controller battery monitoring restored (enabled)* and probes `adb version` with no toggle click; readings stay empty until the next cycle, so nothing stale is shown |
+| Disable disconnects only owned endpoints | PASS | Exactly one `disconnect <ip>:5555` for the shared endpoint; both agents stayed online |
+
+Not covered by this check: the real `adb` binary and USB/TCP transport,
+`adb tcpip 5555` on a headset, real ADB latency/timeouts, the missing-`adb`
+(`adb_unavailable`) path, and the dashboard's painted appearance — the preview
+webview in this environment produced no frames, so the UI evidence above comes
+from the accessibility tree and computed styles rather than a screenshot.
+
+### Physical Quest 3 rows
+
+Nothing below has been run: the switch is off by default, and enabling TCP ADB
+on the headset (`adb tcpip 5555`) was not authorized in this session.
+
+| Test | Result | Notes |
+|---|---|---|
+| Enable the switch, badges match `dumpsys OVRRemoteService` | NOT TESTED | morning-test 40 |
+| Sleeping controller reads `last known` | NOT TESTED | morning-test 41 |
+| Switch off removes badges, everything else keeps working | NOT TESTED | morning-test 42 |
+| `adb disconnect` mid-session only affects badges | NOT TESTED | morning-test 43 |
+| Missing adb → *ADB unavailable*, recovery without re-toggling | NOT TESTED | morning-test 44 |
+| Server restart: switch on, no stale readings | NOT TESTED | morning-test 45 |
+| Headset reboot drops TCP ADB, `adb tcpip 5555` restores it | NOT TESTED | morning-test 46 |
+
+---
+
 ## Live support view (screen_cast_v1), 2026-10-09
 
 Quest model: Quest 3 (adb serial `2G0YC5ZG8106W2`), Horizon OS on Android 14

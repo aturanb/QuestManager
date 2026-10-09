@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { App } from "./App";
 import type { CastClient, CastClientOptions } from "./casting";
 import { LANG_STORAGE, LangProvider } from "./i18n";
-import type { Device, Game } from "./types";
+import type { ControllerBatteryMonitoringState, Device, Game } from "./types";
 
 function device(id: string, name: string, over: Partial<Device> = {}): Device {
   return {
@@ -22,6 +22,7 @@ function device(id: string, name: string, over: Partial<Device> = {}): Device {
     lastCommand: null,
     installedApps: [],
     supportsScreenCast: false,
+    controllerBattery: null,
     ...over,
   };
 }
@@ -622,5 +623,140 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Quest 02" }));
     expect(screen.getByText("1 headset selected")).toBeInTheDocument();
     expect(screen.queryByText("Started 2 sessions; skipped 0 headsets.")).not.toBeInTheDocument();
+  });
+});
+
+/** A board whose controller-monitoring PUT stays pending until the test resolves it. */
+function stubControllerBoard(
+  devices: Device[],
+  initial: ControllerBatteryMonitoringState = { enabled: false, availability: "disabled" }
+) {
+  const calls: { path: string; init?: RequestInit }[] = [];
+  let resolvePut: ((res: Response) => void) | null = null;
+  let liveSocket: { onmessage: ((event: MessageEvent<string>) => void) | null } | null = null;
+  const fetchMock = vi.fn((input: any, init?: RequestInit) => {
+    const path = typeof input === "string" ? input : new URL(input.url).pathname;
+    calls.push({ path, init });
+    if (path === "/api/settings/controller-battery-monitoring") {
+      return new Promise<Response>((resolve) => {
+        resolvePut = resolve;
+      });
+    }
+    if (path === "/api/devices") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ serverTime: new Date().toISOString(), devices, controllerBatteryMonitoring: initial }),
+          { status: 200 }
+        )
+      );
+    }
+    if (path === "/api/games") return Promise.resolve(new Response(JSON.stringify({ games: [] }), { status: 200 }));
+    if (path === "/api/catalog") {
+      return Promise.resolve(new Response(JSON.stringify({ entries: 0, fetchedAt: null, source: "test" }), { status: 200 }));
+    }
+    return Promise.resolve(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal(
+    "WebSocket",
+    class {
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onclose: unknown = null;
+      constructor() {
+        liveSocket = this;
+      }
+      close() {}
+    }
+  );
+  return {
+    calls,
+    puts: () => calls.filter((call) => call.path === "/api/settings/controller-battery-monitoring"),
+    socketReady: () => liveSocket !== null,
+    resolvePut: (body: unknown, status = 200) => {
+      const resolve = resolvePut;
+      resolvePut = null;
+      resolve?.(new Response(JSON.stringify(body), { status }));
+    },
+    push: (next: ControllerBatteryMonitoringState, nextDevices: Device[] = devices) => {
+      liveSocket?.onmessage?.({
+        data: JSON.stringify({
+          type: "state",
+          payload: { serverTime: new Date().toISOString(), devices: nextDevices, controllerBatteryMonitoring: next },
+        }),
+      } as MessageEvent<string>);
+    },
+  };
+}
+
+describe("controller battery monitoring switch", () => {
+  it("shows the server-confirmed position from REST and follows live pushes", async () => {
+    const board = stubControllerBoard([device("d1", "Quest 01")], { enabled: true, availability: "ready" });
+    render(<App />, { wrapper: LangProvider });
+
+    const toggle = await screen.findByRole("switch", { name: "Controller battery monitoring" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await act(async () => board.push({ enabled: false, availability: "disabled" }));
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("sends exactly one PUT, stays unmoved while pending, then follows the server", async () => {
+    const board = stubControllerBoard([device("d1", "Quest 01")]);
+    render(<App />, { wrapper: LangProvider });
+
+    const toggle = await screen.findByRole("switch", { name: "Controller battery monitoring" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    // A second click while the first is in flight must not send another request.
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(board.puts()).toHaveLength(1));
+    expect(JSON.parse(String(board.puts()[0]!.init!.body))).toEqual({ enabled: true });
+    expect(board.puts()[0]!.init!.method).toBe("PUT");
+    const pendingSwitch = screen.getByRole("switch");
+    expect(pendingSwitch).toBeDisabled();
+    expect(pendingSwitch).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
+
+    await act(async () =>
+      board.resolvePut({ controllerBatteryMonitoring: { enabled: true, availability: "ready" } })
+    );
+    await waitFor(() => expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true"));
+    expect(screen.getByRole("switch")).toBeEnabled();
+  });
+
+  it("shows a translated alert on failure and leaves every card control working", async () => {
+    const board = stubControllerBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    render(<App />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Controller battery monitoring" }));
+    await act(async () => board.resolvePut({ error: "boom" }, 500));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't change controller battery monitoring.");
+    // The switch never moved ahead of the server, and no card was disabled by it.
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("button", { name: "Request live view of Quest 01" })).toBeEnabled();
+  });
+
+  it("asks for the admin key again when the server refuses the change", async () => {
+    const board = stubControllerBoard([device("d1", "Quest 01")]);
+    render(<App />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Controller battery monitoring" }));
+    await act(async () => board.resolvePut({ error: "unauthorized" }, 401));
+    expect(await screen.findByRole("button", { name: "Connect" })).toBeInTheDocument();
+  });
+
+  it("speaks Turkish, including the ADB boundary and a failure", async () => {
+    const board = stubControllerBoard([device("d1", "Quest 01")]);
+    localStorage.setItem(LANG_STORAGE, "tr");
+    render(<App />, { wrapper: LangProvider });
+
+    const toggle = await screen.findByRole("switch", { name: "Kontrolcü pili izleme" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(toggle).toHaveAccessibleDescription(/Kablosuz Hata Ayıklama/);
+    fireEvent.click(toggle);
+    await act(async () => board.resolvePut({ error: "boom" }, 500));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Kontrolcü pili izleme değiştirilemedi.");
   });
 });

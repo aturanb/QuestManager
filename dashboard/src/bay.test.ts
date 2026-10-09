@@ -24,6 +24,7 @@ function device(status: "active" | "expired" | null, online = true): Device {
     usageAccessGranted: null,
     foregroundApp: null,
     supportsScreenCast: false,
+    controllerBattery: null,
   };
 }
 

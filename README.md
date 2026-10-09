@@ -88,6 +88,24 @@ it, so a headset is never watchable without someone approving on it. Both
 devices must be on the same subnet. Details in
 [docs/architecture.md](docs/architecture.md#live-support-view-screen_cast_v1).
 
+## Controller batteries (optional)
+
+The dashboard header has one **Controller batteries** switch. It is **off by
+default**; turning it on makes the server read the left/right Touch controller
+levels of connected headsets over wireless ADB and shows compact `L 100%` /
+`R 80%` badges beside the headset battery. It reads
+`adb shell dumpsys OVRRemoteService`, which Horizon OS may change at any update,
+so a changed format only ever means "controller batteries unavailable" — never a
+broken headset.
+
+It needs one optional per-headset step (docs/quest-setup.md): connect USB,
+`adb tcpip 5555`, then unplug. The Quest may stop listening after a reboot, an
+IP change, or an OS update, and the dashboard switch does not change Wireless
+Debugging inside Horizon OS — it only stops or starts CafeQuest's own ADB reads.
+Nothing about this feature can affect online status, sessions, or game
+launching, and controller readings are never stored: they live in memory and
+are refreshed after every server start.
+
 ## Packages
 
 | Path | What it is |

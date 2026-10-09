@@ -70,6 +70,10 @@ export function openDb(path: string): Db {
       completed_at TEXT,
       error TEXT
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS device_apps (
       device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
       package_name TEXT NOT NULL,

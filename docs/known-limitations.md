@@ -109,6 +109,30 @@
   960×540 / 15 FPS / 1.5 Mbps on paper. Picture-within-15s, sub-2s latency, a
   stable 15-minute session, and the battery/thermal impact on a running game are
   all NOT TESTED (docs/morning-test.md rows 21–33).
+- **Controller monitoring is best-effort diagnostics**: it reads
+  `dumpsys OVRRemoteService` over wireless ADB, which is not a stable
+  application API. A Horizon OS update that changes that text produces
+  "controller batteries unavailable", never a broken headset; the feature is
+  off by default and optional.
+- **Wireless ADB is per-headset and per-boot**: someone must run
+  `adb tcpip 5555` over USB once (and again after a reboot, an IP change, or an
+  OS update). The dashboard switch does **not** enable or disable Horizon OS
+  Wireless Debugging, and it cannot fix a headset that stopped listening. When
+  it stops listening, only controller readings are lost.
+- **Controller readings are never stored**: they live in the server's memory and
+  are gone after a restart, so a fresh reading is required every time. The only
+  persisted value is the global enabled flag.
+- **A sleeping controller reads as last known**: Horizon OS keeps reporting the
+  last level with the controller inactive, so the badge keeps the percentage and
+  says "last known" instead of pretending it is live. Levels move slowly; a
+  fresh reading can lag by up to a minute.
+- **Only headsets that reach the server by LAN IPv4 can be read**: a loopback,
+  IPv6, or missing remote address gets `no_wireless_address`, and the headset is
+  otherwise unaffected.
+- **ADB is a shared resource**: CafeQuest disconnects only the endpoints it
+  newly connected itself. A wireless session someone else opened (or a USB
+  session) is read but left running, and if `adb` is missing entirely the
+  dashboard simply reports "ADB unavailable".
 - **The server's name is the PC's hostname**: a Mac without a fixed `HostName`
   takes its name from the router, and that name can change along with the IP,
   after which Auto headsets stop accepting the server. Fix a Mac's name once

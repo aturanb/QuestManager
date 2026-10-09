@@ -11,6 +11,7 @@ Server :3000 (Fastify + better-sqlite3, server/src)
   │  app.ts       HTTP + WS routes, auth gate, hello handshake
   │  hub.ts       live sockets, command lifecycle, sweeps, snapshots
   │  cast-coordinator.ts  one in-memory live-view session, timeouts, routing
+  │  controller-battery.ts  optional ADB poll for Touch controller levels
   │  store.ts     all SQL (devices/games/device apps/sessions/commands)
   │  catalog.ts   local package-name to Meta App ID cache + verified fallbacks
   │  config.ts    cafequest.config.json loading + non-clobbering seed
@@ -110,6 +111,42 @@ audio track anywhere in the codebase.
   `approval_timeout`, `negotiation_timeout`, `projection_stopped`,
   `peer_disconnected`, `capture_failed`, `internal_error`). Raw platform or
   exception text never reaches the wire or the UI.
+
+## Optional controller batteries
+
+Horizon OS knows the left/right Touch controller levels but exposes them only
+through `dumpsys OVRRemoteService`, so this is best-effort diagnostics over
+wireless ADB, off by default:
+
+- **Setting**: one global flag, `controller_battery_monitoring` in the
+  `app_settings` table, changed by
+  `PUT /api/settings/controller-battery-monitoring {enabled}` (admin key). The
+  flag survives restarts; readings do not.
+- **Matching**: the collector polls the headset whose live agent socket came
+  from the same LAN IPv4 address, normalized at the hello
+  (`req.socket.remoteAddress`). The address is in memory only, is never sent to
+  a shell (arguments are always argv through `execFile`), and loopback/IPv6/
+  malformed values are simply not pollable (`no_wireless_address`). No serial
+  number enters the protocol or the database.
+- **Cadence**: immediately after enabling, then once per minute, one cycle at a
+  time, at most one ADB operation per headset.
+- **Ownership**: only endpoints whose `adb connect` said it *newly* connected
+  them are disconnected again when monitoring is turned off or the server
+  exits. A session owned by another tool (`already connected`) is read but never
+  torn down.
+- **Failure boundary**: ADB is outside the liveness, session, and command paths.
+  A missing `adb` (or `ADB_PATH`), a refused connect, a failed dump, or changed
+  diagnostics text only ever change controller-monitoring state. A failed cycle
+  keeps the last values with their old time as `stale`.
+- **Public shape**: `controllerBatteryMonitoring: {enabled, availability}` in
+  the snapshot plus a per-device `controllerBattery` with bounded status and
+  reason codes. Raw ADB output, stderr, endpoints, and serials never reach the
+  REST/WebSocket payloads, the logs, or SQLite.
+
+`ADB_PATH` (optional, see `.env.example`) points at a specific `adb` when it is
+not on `PATH`. The dashboard switch does not enable or disable Wireless
+Debugging on the headsets; that stays a device-side setup step
+(docs/quest-setup.md).
 
 ## Server discovery
 

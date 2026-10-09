@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ApiError, castSocketUrl, deleteDevice, getCatalogStatus, getSnapshot, launchGame, launchInstalledApp, mapInstalledApp, refreshCatalog, requestCast, stopCast, stopSession } from "./api";
+import { ApiError, castSocketUrl, deleteDevice, getCatalogStatus, getSnapshot, launchGame, launchInstalledApp, mapInstalledApp, refreshCatalog, requestCast, setControllerBatteryMonitoring, stopCast, stopSession } from "./api";
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({ ok: status < 300, status, json: () => Promise.resolve(body) }) as any;
@@ -17,6 +17,18 @@ describe("api client", () => {
   it("throws ApiError with status on failure", async () => {
     mockFetch(401, { error: "unauthorized" });
     await expect(getSnapshot("bad")).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
+  });
+
+  it("puts the controller-battery switch as a strict boolean", async () => {
+    mockFetch(200, { controllerBatteryMonitoring: { enabled: true, availability: "ready" } });
+    const result = await setControllerBatteryMonitoring("secret-key", true);
+    const [url, init] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe("/api/settings/controller-battery-monitoring");
+    expect(init.method).toBe("PUT");
+    expect(init.headers.authorization).toBe("Bearer secret-key");
+    expect(init.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ enabled: true });
+    expect(result.controllerBatteryMonitoring).toEqual({ enabled: true, availability: "ready" });
   });
 
   it("launch posts the game id to the device route", async () => {

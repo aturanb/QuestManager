@@ -11,6 +11,28 @@ export type NewDeviceInput = {
   firstSeenAt?: string | null;
 };
 
+// --- app settings ------------------------------------------------------------
+// Only the enabled intent is persisted. Controller readings, remote addresses,
+// and ADB connection ownership stay in memory so a restart cannot present old
+// data as fresh.
+
+const CONTROLLER_BATTERY_MONITORING_KEY = "controller_battery_monitoring";
+
+/** Missing or unrecognized values read as false: monitoring is opt-in. */
+export function getControllerBatteryMonitoringEnabled(db: Db): boolean {
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = ?").get(CONTROLLER_BATTERY_MONITORING_KEY) as
+    | { value: string }
+    | undefined;
+  return row?.value === "true";
+}
+
+export function setControllerBatteryMonitoringEnabled(db: Db, enabled: boolean): void {
+  db.prepare(
+    `INSERT INTO app_settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(CONTROLLER_BATTERY_MONITORING_KEY, enabled ? "true" : "false");
+}
+
 // --- devices ---------------------------------------------------------------
 
 export function upsertDevice(db: Db, input: NewDeviceInput): DeviceRow {

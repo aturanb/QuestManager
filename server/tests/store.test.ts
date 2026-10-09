@@ -31,6 +31,8 @@ import {
   replaceDeviceApps,
   listDeviceApps,
   getGameByPackage,
+  getControllerBatteryMonitoringEnabled,
+  setControllerBatteryMonitoringEnabled,
 } from "../src/store.js";
 
 let db: Db;
@@ -308,4 +310,25 @@ test("openDb migrates a pre-unlimited sessions table, keeping its sessions timed
   assert.equal(getSession(migrated, "legacy")!.endsAt, "2026-01-01T11:00:00.000Z");
   assert.equal(createSession(migrated, "d2", null).endsAt, null);
   migrated.close();
+});
+
+test("controller battery monitoring is off until staff turn it on, and round-trips", () => {
+  assert.equal(getControllerBatteryMonitoringEnabled(db), false, "a fresh database defaults to off");
+  setControllerBatteryMonitoringEnabled(db, true);
+  assert.equal(getControllerBatteryMonitoringEnabled(db), true);
+  setControllerBatteryMonitoringEnabled(db, false);
+  assert.equal(getControllerBatteryMonitoringEnabled(db), false);
+  setControllerBatteryMonitoringEnabled(db, true);
+  setControllerBatteryMonitoringEnabled(db, true);
+  const row = db.prepare("SELECT value FROM app_settings WHERE key = ?").get("controller_battery_monitoring") as {
+    value: string;
+  };
+  assert.equal(row.value, "true", "the setting is stored once, as a literal boolean string");
+});
+
+test("an unreadable stored value counts as off rather than crashing", () => {
+  db.prepare("INSERT INTO app_settings (key, value) VALUES ('controller_battery_monitoring', 'YES')").run();
+  assert.equal(getControllerBatteryMonitoringEnabled(db), false);
+  db.prepare("UPDATE app_settings SET value = '' WHERE key = 'controller_battery_monitoring'").run();
+  assert.equal(getControllerBatteryMonitoringEnabled(db), false);
 });

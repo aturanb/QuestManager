@@ -77,6 +77,7 @@ server :3000 — Fastify + better-sqlite3
   app.ts    routes, auth hooks, the hello handshake
   hub.ts    live sockets, command lifecycle, 1s sweep, 1s dashboard state push
   cast-coordinator.ts  the one in-memory live-view session (no SQL, no media)
+  controller-battery.ts  optional ADB poll of Touch-controller levels (off by default)
   discovery.ts  UDP 3000 responder: answers headset probes with name + HTTP port
   catalog-refresh.ts  the one internet fetch, shared by CLI and refresh route
   store.ts  ALL SQL (devices, games, device_apps, sessions, commands)
@@ -99,6 +100,16 @@ revocation, app shutdown) is idempotent. Cast messages extend the wire protocol,
 so they too live in `shared/src/protocol.ts`, `quest-agent/.../Protocol.kt`, and
 `dashboard/src/types.ts`; browser signaling sits in `dashboard/src/casting.ts`
 with the native adapter in `browser-rtc.ts`.
+
+**Controller batteries** are optional diagnostics: one global flag in
+`app_settings` (`PUT /api/settings/controller-battery-monitoring`), polled once
+a minute over wireless ADB (`dumpsys OVRRemoteService`, matched by the agent
+socket's normalized LAN IPv4) and held only in memory — a restart shows no stale
+readings. ADB failures only ever change controller state, never liveness,
+sessions, or launches; only endpoints CafeQuest newly connected are disconnected
+on disable. `execFile` takes argv, never a shell string, and no raw ADB output,
+stderr, or controller serial reaches an API response or a log. The dashboard
+switch does not enable/disable Horizon OS Wireless Debugging.
 
 Two code paths reach the internet, both via `catalog-refresh.ts`:
 `npm run catalog:update` and `POST /api/catalog/refresh` (the dashboard's

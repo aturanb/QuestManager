@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Device, Game, InstalledApp } from "../types";
+import type { Device, DeviceControllerBattery, Game, InstalledApp } from "../types";
 import { bayState, type BayState } from "../bay";
 import { useI18n, type Messages } from "../i18n";
 import { formatAgo, formatElapsedSince, formatRemaining } from "../time";
@@ -128,6 +128,65 @@ function needsAppId(metaAppId: string): boolean {
 }
 
 type LaunchChoice = { value: string; label: string; disabled: boolean };
+
+/**
+ * Left/right Touch controller levels beside the headset battery. Only rendered
+ * while controller monitoring is on (the server sends null when it is off).
+ * An inactive or stale reading keeps its percentage and says "last known", so a
+ * controller asleep in the drawer is never presented as fresh data.
+ */
+function ControllerBadges({
+  battery,
+  name,
+  now,
+  serverOffsetMs,
+}: {
+  battery: DeviceControllerBattery;
+  name: string;
+  now: number;
+  serverOffsetMs: number;
+}) {
+  const { t } = useI18n();
+  const c = t.controller;
+  const hands = [
+    { key: "left" as const, short: c.left, word: c.leftWord },
+    { key: "right" as const, short: c.right, word: c.rightWord },
+  ];
+  const stale = battery.status === "stale";
+  // Only ever shown for a reading that exists: "Updated never" would be noise.
+  const updated = battery.observedAt ? formatAgo(battery.observedAt, now, serverOffsetMs, t.time) : null;
+  return (
+    <span className="controllers" role="group" aria-label={c.group(name)}>
+      {hands.map(({ key, short, word }) => {
+        const reading = battery[key];
+        if (!reading) {
+          const why = battery.reason ? c.reasons[battery.reason] : c.waiting;
+          return (
+            <span key={key} className="controller-badge" data-state="unavailable" aria-label={c.unavailable(word)} title={why}>
+              {short} <span className="pct">—</span>
+            </span>
+          );
+        }
+        const lastKnown = reading.state === "inactive" || stale;
+        const label = lastKnown ? c.readingLastKnown(word, reading.level) : c.reading(word, reading.level);
+        const why = reading.state === "inactive" ? c.lastKnown : battery.reason ? c.reasons[battery.reason] : null;
+        return (
+          <span
+            key={key}
+            className="controller-badge"
+            data-state={stale ? "stale" : reading.state}
+            aria-label={label}
+            title={why ?? label}
+          >
+            {short} <span className="pct">{reading.level}%</span>
+            {lastKnown && <span className="controller-last">{c.lastKnown}</span>}
+          </span>
+        );
+      })}
+      {updated && <span className="controller-updated">{c.updated(updated)}</span>}
+    </span>
+  );
+}
 
 function Battery({ level, charging }: { level: number | null; charging: boolean | null }) {
   const { t } = useI18n();
@@ -275,7 +334,20 @@ export function DeviceCard(props: DeviceCardProps) {
       <Readout state={state} now={now} serverOffsetMs={serverOffsetMs} />
 
       <dl className="facts">
-        <div><dt>{c.battery}</dt><dd><Battery level={device.batteryLevel} charging={device.charging} /></dd></div>
+        <div>
+          <dt>{c.battery}</dt>
+          <dd>
+            <Battery level={device.batteryLevel} charging={device.charging} />
+            {device.controllerBattery && (
+              <ControllerBadges
+                battery={device.controllerBattery}
+                name={device.name}
+                now={now}
+                serverOffsetMs={serverOffsetMs}
+              />
+            )}
+          </dd>
+        </div>
         <div><dt>{c.openNow}</dt><dd>{openNow}</dd></div>
         <div><dt>{c.lastLaunched}</dt><dd>{device.expectedGame?.name ?? "—"}</dd></div>
         <div><dt>{c.model}</dt><dd>{device.model ?? "—"}</dd></div>

@@ -20,7 +20,10 @@ import {
   stopSession,
   activeSessionForDevice,
   sweepExpiredSessions,
+  getControllerBatteryMonitoringEnabled,
+  setControllerBatteryMonitoringEnabled,
 } from "./store.js";
+import { ControllerBatteryCollector, defaultAdbRunner, type AdbRunner } from "./controller-battery.js";
 import { Hub, AGENT_WS_PATH, CAST_WS_PATH, DASHBOARD_WS_PATH } from "./hub.js";
 import type { CastViewer } from "./cast-coordinator.js";
 import { HelloSchema, ViewerCastSignalSchema } from "@cafequest/shared";
@@ -34,6 +37,8 @@ import { serverDisplayName, startDiscoveryResponder } from "./discovery.js";
 
 /** Viewer signaling frames are tiny; anything larger is rejected as malformed. */
 const CAST_WS_MAX_FRAME_BYTES = 70 * 1024;
+/** Controller batteries change slowly; a faster cadence only adds process churn. */
+const CONTROLLER_BATTERY_POLL_MS = 60_000;
 
 export type AppConfig = {
   dbPath: string;
@@ -49,6 +54,8 @@ export type AppConfig = {
   catalogFetch?: typeof fetch;
   /** UDP port answering headset discovery probes (DISCOVERY_PORT from index.ts); unset = off, tests opt in with 0. */
   discoveryPort?: number;
+  /** Optional controller-battery collector overrides; tests inject a fake runner. */
+  controllerBattery?: { adbPath?: string; runner?: AdbRunner; now?: () => Date; pollIntervalMs?: number };
   logger?: { level?: string; stream?: NodeJS.WritableStream };
 };
 
@@ -84,6 +91,23 @@ export async function buildApp(cfg: AppConfig) {
 
   const hub = new Hub(app, db, () => appCatalog, () => {});
   hub.start();
+
+  // Optional diagnostics: best-effort ADB reads, entirely outside the agent
+  // liveness, session, and command paths. Off unless staff turn it on.
+  const controllerBatteryCollector = new ControllerBatteryCollector({
+    adbPath: cfg.controllerBattery?.adbPath ?? nonBlank(process.env.ADB_PATH) ?? "adb",
+    runner: cfg.controllerBattery?.runner ?? defaultAdbRunner,
+    targets: () => hub.controllerBatteryTargets(),
+    now: cfg.controllerBattery?.now ?? (() => new Date()),
+    pollIntervalMs: cfg.controllerBattery?.pollIntervalMs ?? CONTROLLER_BATTERY_POLL_MS,
+    onChange: () => hub.pushDashboardState(),
+  });
+  hub.setControllerBatteryView(controllerBatteryCollector);
+  // The flag survives restarts; readings deliberately do not.
+  if (getControllerBatteryMonitoringEnabled(db)) {
+    await controllerBatteryCollector.setEnabled(true);
+    app.log.info("controller battery monitoring restored (enabled)");
+  }
 
   // Headsets in Auto mode find this server by broadcasting a probe (spec 2026-10-09 §2).
   const discovery = cfg.discoveryPort === undefined
@@ -137,7 +161,8 @@ export async function buildApp(cfg: AppConfig) {
         // device keeps its old last_seen_at and the offline sweep drops the
         // new socket before the first telemetry arrives.
         touchDevice(db, device.id, {});
-        hub.addAgentSocket(device.id, socket, hello.data.capabilities ?? []);
+        // Captured once at the accepted hello: in memory only, never persisted.
+        hub.addAgentSocket(device.id, socket, hello.data.capabilities ?? [], req.socket.remoteAddress);
         return;
       }
       hub.handleAgentMessage(deviceId, socket, text);
@@ -233,11 +258,22 @@ export async function buildApp(cfg: AppConfig) {
     socket.on("error", () => hub.cast.stop(sessionId, viewer, "viewer_disconnected"));
   });
 
-  // --- REST: devices (enriched snapshot shape: online, expectedGame, session) ----
-  app.get("/api/devices", async () => {
-    const snap = hub.snapshot();
-    return { serverTime: snap.serverTime, devices: snap.devices };
+  // --- REST: settings ----------------------------------------------------------
+  // The global controller-battery switch. It controls CafeQuest's own ADB
+  // collection only: it never enables or disables Horizon OS Wireless Debugging.
+  app.put("/api/settings/controller-battery-monitoring", async (req, reply) => {
+    const body = z.object({ enabled: z.boolean() }).strict().safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_setting_body" });
+    // Persist the intent first: a failed ADB start must not lose the choice.
+    setControllerBatteryMonitoringEnabled(db, body.data.enabled);
+    await controllerBatteryCollector.setEnabled(body.data.enabled);
+    app.log.info({ enabled: body.data.enabled }, "controller battery monitoring changed");
+    hub.pushDashboardState();
+    return { controllerBatteryMonitoring: controllerBatteryCollector.monitoringState() };
   });
+
+  // --- REST: devices (whole snapshot: serverTime, devices, monitoring state) ----
+  app.get("/api/devices", async () => hub.snapshot());
 
   app.post("/api/devices/:deviceId/rename", async (req, reply) => {
     const { deviceId } = req.params as { deviceId: string };
@@ -474,10 +510,19 @@ export async function buildApp(cfg: AppConfig) {
   app.get("/api/health", async () => ({ ok: true, serverTime: nowIso() }));
 
   app.addHook("onClose", async () => {
+    // Collector first: it disconnects only the endpoints it connected, while the
+    // agent sockets are still up for one last cycle to see them.
+    await controllerBatteryCollector.stop();
     hub.stop();
     await discovery?.close();
     db.close();
   });
 
-  return { app, db, hub, discovery };
+  return { app, db, hub, discovery, controllerBatteryCollector };
+}
+
+/** Empty/whitespace env values count as unset. */
+function nonBlank(value: string | undefined): string | undefined {
+  const trimmed = (value ?? "").trim();
+  return trimmed ? trimmed : undefined;
 }

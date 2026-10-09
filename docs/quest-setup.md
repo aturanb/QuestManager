@@ -92,6 +92,29 @@ dashboard, and the view ends by itself if the browser closes, the Wi-Fi drops,
   with café staff is on* so a headset in a charging bay shows why it is asking
   for a tap.
 
+## Optional: controller batteries
+
+Reading the Touch controller levels is optional and separate from normal setup.
+Per headset, once (and again after a reboot, an IP change, or an OS update):
+
+```bash
+# 1. Connect the headset by USB and authorize debugging.
+adb devices
+# 2. Enable TCP ADB for the current boot.
+adb tcpip 5555
+# 3. Unplug USB and confirm the headset is reachable over the LAN.
+adb connect <headset-ip>:5555
+```
+
+Then turn on **Controller batteries** in the dashboard header. Each card shows
+`L`/`R` badges next to the headset battery; a controller that is asleep or
+otherwise inactive keeps its percentage and is labelled `last known`.
+
+Restrict inbound TCP 5555 to the café PC on the trusted café LAN. This is
+diagnostics, not a management or security boundary, and the dashboard switch
+only starts or stops CafeQuest's own ADB reads — it does not enable or disable
+Wireless Debugging inside Horizon OS.
+
 ## Diagnostics controls
 
 - **Reconnect** restarts the agent WebSocket connection.
@@ -136,3 +159,14 @@ dashboard, and the view ends by itself if the browser closes, the Wi-Fi drops,
 - **Launch does nothing**: game not installed/entitled on *that* headset, or
   its target Meta App ID is still a `FILL_*` placeholder (dashboard shows the
   `game_meta_app_id_not_configured` error).
+- **Controller badges show `L — R —` with *ADB unavailable***: `adb` is not
+  installed on the café PC (or `ADB_PATH` in `.env` is wrong). Fix it and wait
+  for the next cycle; no need to toggle the switch.
+- **Controller badges show *No wireless ADB address***: the headset's agent is
+  not connected, or it connected from a loopback/IPv6 address. Reconnect the
+  headset.
+- **Controller badges show *Couldn't connect to the headset over ADB***: TCP ADB
+  is off for this boot (the Quest drops it after a reboot or an OS update). Run
+  `adb tcpip 5555` again over USB.
+- **Badges say *last known***: that controller is asleep. The percentage is the
+  last one Horizon OS reported, not live data.

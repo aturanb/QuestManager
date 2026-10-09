@@ -30,9 +30,38 @@ export type Device = {
   installedApps: InstalledApp[];
   /** Live connection capability (screen_cast_v1); false offline or for older agents. */
   supportsScreenCast: boolean;
+  /** Null while controller monitoring is off; never persisted (fresh readings after restart). */
+  controllerBattery: DeviceControllerBattery | null;
 };
 export type Game = { id: string; name: string; metaAppId: string; enabled: number | boolean };
-export type Snapshot = { serverTime: string; devices: Device[] };
+
+/** Optional controller-battery diagnostics (server ADB collection; off by default). */
+export type ControllerBatterySide = { level: number; state: "active" | "inactive" };
+export type ControllerBatteryReason =
+  | null
+  | "headset_offline"
+  | "no_wireless_address"
+  | "adb_connect_failed"
+  | "dump_failed"
+  | "parse_failed";
+export type DeviceControllerBattery = {
+  left: ControllerBatterySide | null;
+  right: ControllerBatterySide | null;
+  observedAt: string | null;
+  status: "available" | "stale" | "unavailable";
+  reason: ControllerBatteryReason;
+};
+export type ControllerBatteryAvailability = "disabled" | "ready" | "adb_unavailable" | "no_devices";
+export type ControllerBatteryMonitoringState = {
+  enabled: boolean;
+  availability: ControllerBatteryAvailability;
+};
+
+export type Snapshot = {
+  serverTime: string;
+  devices: Device[];
+  controllerBatteryMonitoring: ControllerBatteryMonitoringState;
+};
 
 /** Live-view states relayed on /cast-ws (mirrors the shared protocol enums). */
 export type CastSessionStatus = "awaiting_approval" | "negotiating" | "live" | "stopped" | "failed";

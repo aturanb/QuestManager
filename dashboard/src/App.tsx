@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Device, Game, Snapshot } from "./types";
+import type { ControllerBatteryMonitoringState, Device, Game, Snapshot } from "./types";
 import {
   ApiError,
   castSocketUrl,
@@ -14,6 +14,7 @@ import {
   mapInstalledApp,
   refreshCatalog,
   requestCast,
+  setControllerBatteryMonitoring,
   startSession,
   stopCast,
   stopSession,
@@ -21,6 +22,7 @@ import {
 import { CastClient, type CastClientOptions, type CastViewState } from "./casting";
 import { BoardSummary } from "./components/BoardSummary";
 import { CatalogButton } from "./components/CatalogButton";
+import { ControllerBatteryToggle } from "./components/ControllerBatteryToggle";
 import { DeviceCard } from "./components/DeviceCard";
 import { KeyPrompt } from "./components/KeyPrompt";
 import { LangToggle } from "./components/LangToggle";
@@ -66,8 +68,14 @@ export function App({ castFactory }: AppProps = {}) {
   const [catalog, setCatalog] = useState<{ entries: number; fetchedAt: string | null } | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<unknown>(null);
+  /** Server-confirmed controller-monitoring state; null until the first snapshot. */
+  const [controllerMonitoring, setControllerMonitoring] = useState<ControllerBatteryMonitoringState | null>(null);
+  const [controllerPending, setControllerPending] = useState(false);
+  const [controllerFailed, setControllerFailed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const wsRef = useRef<{ close: () => void } | null>(null);
+  /** Blocks a second click synchronously, before React re-renders the disabled switch. */
+  const controllerPendingRef = useRef(false);
   const keyRef = useRef(key);
   keyRef.current = key;
   const [liveView, setLiveView] = useState<ActiveLiveView | null>(null);
@@ -81,6 +89,7 @@ export function App({ castFactory }: AppProps = {}) {
   const applySnapshot = useCallback((snap: Snapshot) => {
     setDevices(snap.devices);
     setServerOffsetMs(new Date(snap.serverTime).getTime() - Date.now());
+    if (snap.controllerBatteryMonitoring) setControllerMonitoring(snap.controllerBatteryMonitoring);
     setGlobalError(null);
   }, []);
 
@@ -88,6 +97,31 @@ export function App({ castFactory }: AppProps = {}) {
     setKeyRequired(true);
     wsRef.current?.close();
   }, []);
+
+  /**
+   * One PUT per toggle. The switch shows the server-confirmed position, so a
+   * failure simply leaves it where it was; nothing on a card is touched.
+   */
+  const toggleControllerMonitoring = useCallback(
+    async (enabled: boolean) => {
+      if (controllerPendingRef.current) return;
+      controllerPendingRef.current = true;
+      setControllerPending(true);
+      setControllerFailed(false);
+      try {
+        const result = await setControllerBatteryMonitoring(keyRef.current, enabled);
+        setControllerMonitoring(result.controllerBatteryMonitoring);
+      } catch (error) {
+        // 401 goes to the key prompt; anything else is a bounded admin message.
+        if (error instanceof ApiError && error.status === 401) demandKey();
+        else setControllerFailed(true);
+      } finally {
+        controllerPendingRef.current = false;
+        setControllerPending(false);
+      }
+    },
+    [demandKey]
+  );
 
   useEffect(() => {
     const liveIds = new Set(devices.map((device) => device.id));
@@ -385,6 +419,14 @@ export function App({ castFactory }: AppProps = {}) {
         <h1 className="brand">CafeQuest</h1>
         <BoardSummary devices={devices} now={now} serverOffsetMs={serverOffsetMs} />
         <p className="feed" data-live={wsLive}>{wsLive ? t.app.live : t.app.connecting}</p>
+        {controllerMonitoring && (
+          <ControllerBatteryToggle
+            state={controllerMonitoring}
+            pending={controllerPending}
+            error={controllerFailed ? t.controller.error : null}
+            onChange={(enabled) => void toggleControllerMonitoring(enabled)}
+          />
+        )}
         <LangToggle />
       </header>
       <main className="shell">
