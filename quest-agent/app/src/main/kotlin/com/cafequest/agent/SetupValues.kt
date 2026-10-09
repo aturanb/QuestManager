@@ -3,6 +3,19 @@ package com.cafequest.agent
 /** Sentinel the launcher treats as "no Meta Dashboard App ID configured yet". */
 const val UNCONFIGURED_APP_ID = "UNCONFIGURED"
 
+/** How the agent gets its server address (spec §4). */
+enum class ServerMode(val stored: String) {
+    /** Found on the Wi-Fi, and followed when the café PC's IP changes. */
+    AUTO("auto"),
+    /** Typed on the setup screen; never replaced by a search. */
+    MANUAL("manual");
+
+    companion object {
+        /** Missing or junk reads as Auto, so headsets upgraded from 0.2.0 start healing themselves. */
+        fun fromStored(value: String?): ServerMode = entries.firstOrNull { it.stored == value } ?: AUTO
+    }
+}
+
 /**
  * Values baked in at build time from the café PC's `.env` and
  * `cafequest.config.json` (see app/build.gradle.kts), so a freshly installed
