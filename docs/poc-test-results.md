@@ -16,6 +16,7 @@ Date: 2026-10-08
 | Usage access | PASS | `usageAccessGranted: true` after `adb shell appops set com.cafequest.agent GET_USAGE_STATS allow`. |
 | Current game detection | PASS | After two bugs fixed (below), the snapshot showed `Breachers` with a stable `startedAt` and a climbing duration (8s → 13s), clearing to none when the game actually paused. |
 | Foreground app launch | PASS | `launch-installed` for `com.TriangleFactory.Breachers` → `command_result: success`, game opened on the headset. This is the fix for launches previously reported as failed. |
+| Sideloaded Android package launch | NOT TESTED | Package-target protocol, dashboard selection and agent launch routing are unit-tested; physical Quest background launch remains morning-test row 5a. |
 | Background heartbeat | PASS | Telemetry kept flowing for minutes while Breachers was the resumed app. |
 | Background command reception | PASS | A launch command sent while Breachers was already in the foreground was acked and completed `success`. |
 | Catalog refresh | PASS | `GET /api/catalog` reported 18,034 mappings; a live CLI refresh stored 18,100. |

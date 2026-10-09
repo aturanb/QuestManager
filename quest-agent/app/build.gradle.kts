@@ -33,8 +33,8 @@ android {
         applicationId = "com.cafequest.agent"
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "DEFAULT_META_APP_ID", javaString(configuredMetaAppId()))

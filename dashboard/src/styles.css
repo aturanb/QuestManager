@@ -278,16 +278,24 @@ input::placeholder { color: var(--chalk-dim); }
 .note[data-tone="ok"] { color: var(--ready); }
 .note[data-tone="bad"] { background: #33212a; color: #ff8a8a; }
 
-/* ---- installed apps that still need a Meta App ID ------------------------- */
+/* ---- installed app identifiers and optional Meta mapping ------------------ */
 .inventory { font-size: 0.8125rem; color: var(--chalk-dim); }
-.unmatched { padding-top: 10px; border-top: 1px solid var(--rail); }
-.unmatched summary { padding: 4px 0; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
+.app-id-list { padding-top: 10px; border-top: 1px solid var(--rail); }
+.app-id-list summary { padding: 4px 0; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
 .hint { margin: 6px 0 2px; font-size: 0.8125rem; color: var(--chalk-dim); }
 .mapping { display: grid; gap: 8px; padding: 10px 0; }
 .mapping + .mapping { border-top: 1px dashed var(--rail); }
-.mapping-app code { display: block; margin-top: 2px; padding: 0; background: none; font-size: 0.75rem; color: var(--chalk-dim); overflow-wrap: anywhere; }
+.mapping-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; }
+.app-source { font-size: 0.75rem; color: var(--chalk-dim); }
+.app-identifiers { display: grid; gap: 3px; margin-top: 6px; }
+.app-identifiers div { display: grid; grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.app-identifiers dt { font-size: 0.75rem; color: var(--chalk-dim); }
+.app-identifiers dd { min-width: 0; font-size: 0.75rem; overflow-wrap: anywhere; }
+.app-identifiers code { padding: 0; background: none; color: var(--chalk); overflow-wrap: anywhere; }
 .mapping-entry { display: flex; gap: 8px; }
-.mapping-entry input { flex: 1 1 auto; min-width: 0; }
+.mapping-field { display: grid; flex: 1 1 auto; gap: 4px; min-width: 0; }
+.mapping-field span { font-size: 0.75rem; color: var(--chalk-dim); }
+.mapping-entry input { width: 100%; min-width: 0; }
 
 /* ---- removing a stale headset ---------------------------------------------- */
 .bay-foot { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--rail); }

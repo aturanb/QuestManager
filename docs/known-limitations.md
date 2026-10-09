@@ -47,9 +47,15 @@
 - **Usage access needs an adb grant**: `PACKAGE_USAGE_STATS` is not user-grantable
   on Quest, so each headset needs `adb shell appops set com.cafequest.agent
   GET_USAGE_STATS allow` once (see docs/quest-setup.md).
-- **Catalog refresh needs the internet**: the dashboard's *Update app list*
-  button reaches `raw.githubusercontent.com`. On a café LAN with no WAN access
-  it fails and keeps the mappings already cached.
+- **Catalog refresh needs the internet, but sideloaded launch does not**: the
+  dashboard's *Update app list* button reaches `raw.githubusercontent.com` to
+  identify official Meta apps. On a café LAN with no WAN access it fails and
+  keeps the mappings already cached; unmatched apps remain launchable by their
+  Android package ID.
+- **Direct package launch still needs a physical Quest check**: the agent uses
+  Android's Leanback/launcher intent for apps without a Meta App ID. Unit tests
+  cover routing and errors, but Quest background-activity policy may differ;
+  morning-test row 5a is the acceptance check.
 - **Model is whatever the headset reports**: the card's **Model** row shows
   Android's `Build.MODEL` from the agent's hello. A Quest 3 reports "Quest 3"
   (seen on hardware); what a Quest 2, Pro or 3S reports is UNVERIFIED. The

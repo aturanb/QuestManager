@@ -27,12 +27,9 @@ fun installedAppsReport(
 }
 
 /** Pure selection boundary: only user-installed packages leave the headset. */
-fun selectThirdPartyApps(
-    candidates: List<InstalledAppCandidate>,
-    ownPackageName: String,
-): List<InstalledApp> = candidates
+fun selectThirdPartyApps(candidates: List<InstalledAppCandidate>): List<InstalledApp> = candidates
     .asSequence()
-    .filterNot { it.isSystem || it.packageName == ownPackageName }
+    .filterNot { it.isSystem }
     .distinctBy { it.packageName }
     .map {
         InstalledApp(
@@ -61,7 +58,7 @@ fun scanInstalledApps(context: Context): InstalledAppScanResult {
                 isSystem = info.flags and systemFlags != 0,
             )
         }
-        InstalledAppScanResult.Success(selectThirdPartyApps(candidates, context.packageName))
+        InstalledAppScanResult.Success(selectThirdPartyApps(candidates))
     } catch (error: Exception) {
         Log.w(LOG_TAG, "installed app scan failed: ${error.message}")
         InstalledAppScanResult.Failure(error.message ?: error::class.java.simpleName)

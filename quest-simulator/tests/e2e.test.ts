@@ -111,6 +111,21 @@ test("simulated shift: connect, session, launch, switch, failure, timeout, recon
   assert.equal(playing.usageAccessGranted, true);
   assert.ok(Date.parse(playing.foregroundApp.startedAt) > 0);
 
+  // An app absent from the Meta catalog launches through its Android package.
+  const packageLaunch = await fetch(`${base}/api/devices/${sim.deviceId}/launch-installed`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ packageName: "com.example.cafequestlocal" }),
+  });
+  assert.equal(packageLaunch.status, 202);
+  await waitUntil(() => sim.expectedGame?.gameId === "installed:com.example.cafequestlocal");
+  await waitUntil(() => {
+    const lastCmd = db
+      .prepare(`SELECT status FROM commands WHERE device_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(sim.deviceId) as any;
+    return lastCmd?.status === "success";
+  });
+
   // Game A -> Game B switch (the critical experiment, simulated)
   const lres2 = await fetch(`${base}/api/devices/${sim.deviceId}/launch`, {
     method: "POST",

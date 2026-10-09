@@ -146,6 +146,33 @@ test("server command schema matches brief §20 shape", () => {
   assert.equal(ServerCommandSchema.safeParse(cmd).success, true);
 });
 
+test("launch command accepts exactly one Meta or Android package target", () => {
+  const base = {
+    type: "command",
+    protocolVersion: 1,
+    commandId: hello.deviceId,
+    command: "launch_app",
+    payload: { gameId: "local-game", gameName: "Local Game" },
+  } as const;
+
+  assert.equal(
+    ServerCommandSchema.safeParse({ ...base, payload: { ...base.payload, metaAppId: "12345" } }).success,
+    true,
+  );
+  assert.equal(
+    ServerCommandSchema.safeParse({ ...base, payload: { ...base.payload, packageName: "com.example.localgame" } }).success,
+    true,
+  );
+  assert.equal(ServerCommandSchema.safeParse(base).success, false);
+  assert.equal(
+    ServerCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, metaAppId: "12345", packageName: "com.example.localgame" },
+    }).success,
+    false,
+  );
+});
+
 test("parseAgentMessage: invalid JSON is rejected safely", () => {
   const r = parseAgentMessage("{not json");
   assert.equal(r.ok, false);

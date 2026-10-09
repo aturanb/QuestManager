@@ -108,16 +108,33 @@ export const AgentMessageSchema = z.discriminatedUnion("type", [
   CommandResultSchema,
 ]);
 
+export const LaunchPayloadSchema = z
+  .object({
+    gameId: z.string().min(1),
+    gameName: z.string().min(1),
+    metaAppId: z.string().min(1).optional(),
+    packageName: z
+      .string()
+      .min(3)
+      .max(255)
+      .regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/)
+      .optional(),
+  })
+  .superRefine((payload, ctx) => {
+    if ((payload.metaAppId === undefined) === (payload.packageName === undefined)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "launch payload requires exactly one target",
+      });
+    }
+  });
+
 export const ServerCommandSchema = z.object({
   type: z.literal("command"),
   protocolVersion: z.literal(PROTOCOL_VERSION),
   commandId: z.string().uuid(),
   command: z.literal("launch_app"),
-  payload: z.object({
-    gameId: z.string().min(1),
-    gameName: z.string().min(1),
-    metaAppId: z.string().min(1),
-  }),
+  payload: LaunchPayloadSchema,
 });
 
 export const ServerErrorSchema = z.object({

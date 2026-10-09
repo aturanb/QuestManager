@@ -24,14 +24,15 @@ export type DeviceStats = {
 };
 
 /**
- * Packages the simulated headsets report as installed. Real package names, so
- * the community catalog resolves them to real Meta App IDs on the dashboard.
+ * Packages the simulated headsets report as installed. Catalog matches use
+ * Meta App IDs; any unmatched package can still launch by Android package ID.
  */
 export const SIM_INSTALLED_APPS: InstalledApp[] = [
   { packageName: "com.beatgames.beatsaber", label: "Beat Saber", versionName: "1.37.0", versionCode: 1370 },
   { packageName: "com.MightyCoconut.WalkaboutMiniGolf", label: "Walkabout Mini Golf", versionName: "3.4.1", versionCode: 341 },
   { packageName: "quest.eleven.forfunlabs", label: "Eleven Table Tennis", versionName: "2.1.0", versionCode: 210 },
   { packageName: "com.TriangleFactory.Breachers", label: "Breachers", versionName: "1.9.2", versionCode: 192 },
+  { packageName: "com.example.cafequestlocal", label: "CafeQuest Local", versionName: "1.0.0", versionCode: 1 },
 ];
 
 /**

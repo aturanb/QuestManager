@@ -5,7 +5,7 @@
 ```bash
 npm install
 cp .env.example .env # replace the change-me admin key before continuing
-npm run catalog:update # refresh the local package-name/App-ID mapping
+npm run catalog:update # optional: identify official Meta apps automatically
 npm run dev        # server :3000 + dashboard :5173
 ```
 
@@ -41,6 +41,7 @@ connect**.
 | 3 | Dashboard shows `Quest 01` with `Online`, battery XX% | |
 | 4 | Start a 60-min session → countdown ticks | |
 | 5 | Confirm the game picker lists the headset's matched games under **Installed on this headset**; select one → **Launch** → badge goes `Launching…` → `Launched ✓`, game opens | |
+| 5a | Expand **Installed app IDs**: confirm CafeQuest shows Android package ID `com.cafequest.agent`. Select CafeQuest (Android package) while another app is open → **Launch** → `Launched ✓`, CafeQuest opens without a manual Meta mapping | |
 | 6 | Leave the game running 2 min: still Online? battery telemetry moving? | |
 | 6a | **Open now** names the game actually running and its timer climbs | |
 | 6b | Open the Meta universal menu, close it: the game and its timer survive the peek (no reset to 0:00) | |
@@ -74,8 +75,9 @@ connect**.
   is still a placeholder in `cafequest.config.json`.
 - **Installed list missing**: reinstall the newly built APK, then tap
   **Reconnect** in CafeQuest. Inventory is scanned once per connection.
-- **App needs a Meta App ID**: expand the unmatched-app section, copy the
-  number at the end of that app's Meta Store URL, and save it locally.
+- **Sideloaded app will not launch**: expand **Installed app IDs** and confirm
+  the Android package ID is present. A Meta App ID is optional; add one only if
+  the app is registered with Meta and direct package launch is unsuitable.
 - **Meta login/entitlement prompt**: sign the test Meta account into the
   headset and entitle the game to it.
 

@@ -97,6 +97,19 @@ the refresh must apply without restarting the server mid-shift. A single-flight
 lock keeps a double-clicked button to one download; any failure (network, HTTP,
 shape, <1000 valid records) leaves the previous cache file untouched.
 
+## Sideloaded apps launch by Android package ID
+
+Decision: launch commands carry exactly one target: a numeric Meta App ID for
+catalog/manual matches, or an Android package ID for unmatched installed apps.
+The agent reports itself in the non-system inventory and uses the package's
+Leanback/launcher activity for the Android path.
+
+Reason: sideloaded apps may have no Meta App ID at all. The community GitHub
+catalog remains valuable for identifying official apps and preserving Meta's
+supported `launchOtherApp` path, but it must not block a locally installed app.
+The direct Android launch path remains `UNVERIFIED_HARDWARE` until
+`docs/morning-test.md` row 5a passes.
+
 ## Agent setup defaults are baked in at build time
 
 Decision: `app/build.gradle.kts` reads the repo-root `.env`

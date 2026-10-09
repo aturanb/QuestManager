@@ -27,6 +27,26 @@ class ProtocolTest {
         assertNull(parseLaunchCommand("""{"type":"command","protocolVersion":1,"commandId":"c","command":"launch_app"}"""))
     }
 
+    @Test fun `package launch command parses and ambiguous targets are rejected`() {
+        val packageCommand = parseLaunchCommand(
+            """{"type":"command","protocolVersion":1,"commandId":"c2","command":"launch_app","payload":{"gameId":"local","gameName":"Local App","packageName":"com.example.local"}}"""
+        )
+
+        assertNotNull(packageCommand)
+        assertEquals("com.example.local", packageCommand!!.payload!!.packageName)
+        assertNull(packageCommand.payload!!.metaAppId)
+        assertNull(
+            parseLaunchCommand(
+                """{"type":"command","protocolVersion":1,"commandId":"c3","command":"launch_app","payload":{"gameId":"local","gameName":"Local App","metaAppId":"12345","packageName":"com.example.local"}}"""
+            )
+        )
+        assertNull(
+            parseLaunchCommand(
+                """{"type":"command","protocolVersion":1,"commandId":"c4","command":"launch_app","payload":{"gameId":"local","gameName":"Local App"}}"""
+            )
+        )
+    }
+
     @Test fun `ack and result carry deviceId for ownership checks`() {
         val ack = protocolJson.encodeToString(CommandAck(commandId = "c", deviceId = "d"))
         assertTrue(ack.contains("\"deviceId\":\"d\""))

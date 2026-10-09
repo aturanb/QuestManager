@@ -253,14 +253,15 @@ export async function buildApp(cfg: AppConfig) {
     const installed = getDeviceApp(db, deviceId, body.data.packageName);
     if (!installed) return reply.code(400).send({ error: "app_not_installed" });
     const resolved = resolveInstalledApp(db, appCatalog, installed);
-    if (!resolved.metaAppId) return reply.code(400).send({ error: "meta_app_id_unknown" });
     if (!hub.isDeviceConnected(deviceId)) {
       return reply.code(409).send({ error: "headset offline", detail: "device not connected" });
     }
     const commandId = hub.queueLaunch(deviceId, {
       gameId: `installed:${resolved.packageName}`,
       name: resolved.name,
-      metaAppId: resolved.metaAppId,
+      ...(resolved.metaAppId
+        ? { metaAppId: resolved.metaAppId }
+        : { packageName: resolved.packageName }),
     });
     if (!commandId) return reply.code(409).send({ error: "headset offline" });
     return reply.code(202).send({ commandId, status: "sent" });

@@ -32,6 +32,9 @@ export const AGENT_WS_PATH = "/agent-ws";
 export const DASHBOARD_WS_PATH = "/dashboard-ws";
 
 type DeviceConn = { socket: WebSocket; deviceId: string };
+type LaunchTarget =
+  | { gameId: string; name: string; metaAppId: string; packageName?: never }
+  | { gameId: string; name: string; packageName: string; metaAppId?: never };
 
 /** Typed protocol error back to an agent; never includes secrets. */
 export function sendAgentError(socket: WebSocket, code: ServerError["code"], message: string): void {
@@ -209,7 +212,7 @@ export class Hub {
    * device is not connected (the REST layer answers 409 offline); there is no
    * store-and-forward queue, so HTTP 202 always means "sent to the socket".
    */
-  queueLaunch(deviceId: string, game: { gameId: string; name: string; metaAppId: string }): string | null {
+  queueLaunch(deviceId: string, game: LaunchTarget): string | null {
     if (!this.devices.has(deviceId)) return null;
     const cmd = createCommand(this.db, deviceId, "launch_app");
     this.deliver(cmd.id, deviceId, game);
@@ -217,7 +220,7 @@ export class Hub {
     return cmd.id;
   }
 
-  private deliver(commandId: string, deviceId: string, game: { gameId: string; name: string; metaAppId: string }): void {
+  private deliver(commandId: string, deviceId: string, game: LaunchTarget): void {
     const conn = this.devices.get(deviceId);
     if (!conn) return;
     const command: ServerCommand = {
@@ -225,7 +228,13 @@ export class Hub {
       protocolVersion: 1,
       commandId,
       command: "launch_app",
-      payload: { gameId: game.gameId, gameName: game.name, metaAppId: game.metaAppId },
+      payload: {
+        gameId: game.gameId,
+        gameName: game.name,
+        ...(game.metaAppId !== undefined
+          ? { metaAppId: game.metaAppId }
+          : { packageName: game.packageName }),
+      },
     };
     markCommand(this.db, commandId, "sent");
     conn.socket.send(JSON.stringify(command));

@@ -42,12 +42,18 @@ Agents: quest-simulator (test) or quest-agent APK (hardware)
 - **DB is authoritative after boot**: `cafequest.config.json` seeds missing games and
   upgrades placeholder App IDs, but never overwrites real values staff set.
 - **Installed app discovery**: the private sideloaded Android agent uses
-  `QUERY_ALL_PACKAGES`, filters out system packages and itself, and reports at
+  `QUERY_ALL_PACKAGES`, filters out system packages, and reports at
   most 512 entries once per WebSocket connection. The server drops a few Meta
   system components that arrive as user packages (`IGNORED_PACKAGES` in
   `installed-apps.ts`), persists the rest of each device inventory and matches
   it against a local, gitignored catalog cache. Manual package-to-App-ID
   corrections override community matches.
+- **Installed app launch**: a catalog or manual match sends exactly one Meta
+  App ID to `launchOtherApp`. An unmatched package instead sends exactly one
+  Android package ID; the agent resolves its Leanback/launcher activity and
+  starts it as a new task. The GitHub catalog improves official-app metadata
+  but is not required for sideloaded apps. Physical Quest package launching is
+  `UNVERIFIED_HARDWARE` until morning-test row 5a passes.
 
 ## Server discovery
 

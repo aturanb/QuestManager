@@ -171,7 +171,7 @@ describe("DeviceCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Launch game on Quest 01" }));
     expect(p.onLaunchInstalled).toHaveBeenCalledWith("d1", "com.example.beta");
     expect(p.onLaunch).not.toHaveBeenCalled();
-    expect(screen.getByText("2 apps on this headset, 2 ready to launch")).toBeInTheDocument();
+    expect(screen.getByText("2 apps on this headset, all ready to launch")).toBeInTheDocument();
   });
 
   it("allows an unmatched installed package to be mapped manually", () => {
@@ -183,10 +183,30 @@ describe("DeviceCard", () => {
       }),
     });
     render(<DeviceCard {...p} />);
-    fireEvent.click(screen.getByText("1 app needs a Meta App ID"));
+    fireEvent.click(screen.getByText("Installed app IDs (1)"));
     fireEvent.change(screen.getByLabelText("Meta App ID for Unknown Game"), { target: { value: "1234567890123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Save mapping for Unknown Game" }));
     expect(p.onMapInstalled).toHaveBeenCalledWith("d1", "com.example.unknown", "Unknown Game", "1234567890123456");
+  });
+
+  it("launches a sideloaded app by package and exposes both identifier types", () => {
+    const p = props({
+      device: device({
+        installedApps: [
+          { packageName: "com.example.local", label: "Local Game", versionName: "3.0", versionCode: 30, name: "Local Game", metaAppId: null, source: null },
+        ],
+      }),
+    });
+    render(<DeviceCard {...p} />);
+
+    expect(screen.getByRole("option", { name: "Local Game (Android package)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Launch game on Quest 01" }));
+    expect(p.onLaunchInstalled).toHaveBeenCalledWith("d1", "com.example.local");
+
+    fireEvent.click(screen.getByText("Installed app IDs (1)"));
+    expect(screen.getByText("com.example.local")).toBeInTheDocument();
+    expect(screen.getByText("Android package")).toBeInTheDocument();
+    expect(screen.getByText("No Meta App ID")).toBeInTheDocument();
   });
 
   it("falls back when the previously selected installed package is removed", () => {
@@ -376,7 +396,7 @@ describe("DeviceCard in Turkish", () => {
     expect(p.onStartSession).toHaveBeenCalledWith("d1", 60);
   });
 
-  it("names the open game and the apps still missing a Meta App ID", () => {
+  it("names the open game and distinguishes Meta from Android package IDs", () => {
     const p = props({
       games: [{ id: "beat-saber", name: "Beat Saber", metaAppId: "FILL_BEAT_SABER_APP_ID", enabled: 1 }],
       device: device({
@@ -387,10 +407,10 @@ describe("DeviceCard in Turkish", () => {
     });
     renderTurkish(<DeviceCard {...p} />);
     expect(screen.getByText("Alpha VR, 12:34 süredir")).toBeInTheDocument();
-    expect(screen.getByText("Bu gözlükte 2 uygulama var, 1 tanesi açılmaya hazır")).toBeInTheDocument();
+    expect(screen.getByText("Bu gözlükte 2 uygulama var, hepsi açılmaya hazır")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Beat Saber (Meta App ID gerekli)" })).toBeDisabled();
 
-    fireEvent.click(screen.getByText("1 uygulamanın Meta App ID'si eksik"));
+    fireEvent.click(screen.getByText("Yüklü uygulama kimlikleri (2)"));
     expect(screen.getByText(/“Uygulama listesini güncelle”/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Oyun Kutusu için Meta App ID"), { target: { value: "1234567890123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Oyun Kutusu için eşleştirmeyi kaydet" }));

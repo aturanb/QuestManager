@@ -9,7 +9,7 @@ and remote game launching — from a web dashboard on the café PC.
 ```bash
 npm install
 cp .env.example .env # then replace the change-me admin key
-npm run catalog:update # cache the community package/App-ID catalog locally
+npm run catalog:update # optional: identify official Meta apps automatically
 npm run dev          # starts server (port 3000) + dashboard (port 5173)
 npm run simulator -- --count 8   # separate terminal: 8 simulated headsets
 npm test
@@ -18,7 +18,10 @@ npm test
 The server automatically loads the repository-root `.env`. Values exported in
 the shell take precedence over values in that file.
 
-`catalog:update` and the dashboard's **Update app list** button are the only
+The catalog is optional for sideloaded apps: CafeQuest can list and launch them
+directly by Android package ID. `catalog:update` and the dashboard's **Update
+app list** button enrich official apps with their names and numeric Meta App
+IDs, and are the only
 things that contact the community catalog ([threethan/MetaMetadata], refreshed
 daily upstream, ~18k apps). Both run the same code path
 (`server/src/catalog-refresh.ts`): validate, then replace `server/data/app-catalog.json`
@@ -57,12 +60,15 @@ let the user approve `PACKAGE_USAGE_STATS` from inside the app:
 adb shell appops set com.cafequest.agent GET_USAGE_STATS allow
 ```
 
-The private agent reports its non-system installed packages when it connects.
-The dashboard matches those package names to the local catalog and lists them
-under **Installed on this headset** in each card's game picker. Unknown packages
-remain visible and can be assigned a numeric Meta App ID from the dashboard;
-that correction is stored in SQLite. An offline card offers **Remove headset**
-to clear stale headsets off the board.
+The private agent reports its non-system installed packages, including
+CafeQuest itself, when it connects. The dashboard lists every package under
+**Installed on this headset** and exposes both identifier types under
+**Installed app IDs**. Catalog-matched apps launch through Meta's
+`launchOtherApp`; unmatched/sideloaded apps launch directly by Android package
+ID and do not need the GitHub catalog. If a package really has a Meta App ID,
+staff can still add that optional mapping from the dashboard; it is stored in
+SQLite. An offline card offers **Remove headset** to clear stale headsets off
+the board.
 
 ## Packages
 

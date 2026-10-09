@@ -26,7 +26,7 @@ export type DeviceCardProps = {
   onRemove: (deviceId: string) => void;
 };
 
-function UnmatchedAppMapping(props: {
+function InstalledAppDetails(props: {
   app: InstalledApp;
   deviceId: string;
   busy: boolean;
@@ -35,29 +35,44 @@ function UnmatchedAppMapping(props: {
   const { t } = useI18n();
   const [metaAppId, setMetaAppId] = useState("");
   const valid = /^\d{5,32}$/.test(metaAppId);
+  const source = props.app.source === "catalog"
+    ? t.card.sourceCatalog
+    : props.app.source === "manual"
+      ? t.card.sourceManual
+      : t.card.sourcePackage;
   return (
     <div className="mapping">
       <div className="mapping-app">
-        <strong>{props.app.label}</strong>
-        <code>{props.app.packageName}</code>
+        <div className="mapping-title">
+          <strong>{props.app.label}</strong>
+          <span className="app-source">{source}</span>
+        </div>
+        <dl className="app-identifiers">
+          <div><dt>{t.card.packageId}</dt><dd><code>{props.app.packageName}</code></dd></div>
+          <div><dt>{t.card.metaAppId}</dt><dd>{props.app.metaAppId ? <code>{props.app.metaAppId}</code> : t.card.noMetaAppId}</dd></div>
+        </dl>
       </div>
-      <div className="mapping-entry">
-        <input
-          aria-label={t.card.appIdLabel(props.app.label)}
-          placeholder={t.card.appIdPlaceholder}
-          inputMode="numeric"
-          value={metaAppId}
-          onChange={(event) => setMetaAppId(event.target.value.trim())}
-        />
-        <button
-          className="btn"
-          aria-label={t.card.saveLabel(props.app.label)}
-          disabled={props.busy || !valid}
-          onClick={() => props.onMap(props.deviceId, props.app.packageName, props.app.label, metaAppId)}
-        >
-          {t.card.save}
-        </button>
-      </div>
+      {props.app.metaAppId === null && (
+        <div className="mapping-entry">
+          <label className="mapping-field">
+            <span>{t.card.appIdLabel(props.app.label)}</span>
+            <input
+              placeholder={t.card.appIdPlaceholder}
+              inputMode="numeric"
+              value={metaAppId}
+              onChange={(event) => setMetaAppId(event.target.value.trim())}
+            />
+          </label>
+          <button
+            className="btn"
+            aria-label={t.card.saveLabel(props.app.label)}
+            disabled={props.busy || !valid}
+            onClick={() => props.onMap(props.deviceId, props.app.packageName, props.app.label, metaAppId)}
+          >
+            {t.card.save}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -180,13 +195,11 @@ export function DeviceCard(props: DeviceCardProps) {
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const status = launchStatus(props.pendingCommandId, device);
 
-  // One picker for both launch paths: apps the headset reported (with a known
-  // Meta App ID) and the café's configured game list.
-  const mappedInstalled = device.installedApps.filter((app) => app.metaAppId !== null);
-  const unmatchedInstalled = device.installedApps.filter((app) => app.metaAppId === null);
-  const installedChoices: LaunchChoice[] = mappedInstalled.map((app) => ({
+  // One picker for both launch paths: catalog matches use Meta's API; anything
+  // else falls back to its Android package name on the headset.
+  const installedChoices: LaunchChoice[] = device.installedApps.map((app) => ({
     value: `pkg:${app.packageName}`,
-    label: app.name,
+    label: app.metaAppId === null ? c.androidPackageChoice(app.name) : app.name,
     disabled: false,
   }));
   const gameChoices: LaunchChoice[] = games
@@ -377,14 +390,14 @@ export function DeviceCard(props: DeviceCardProps) {
       {props.error && <p className="note" data-tone="bad" role="alert">{props.error}</p>}
 
       {device.installedApps.length > 0 && (
-        <p className="inventory">{c.inventory(device.installedApps.length, mappedInstalled.length)}</p>
+        <p className="inventory">{c.inventory(device.installedApps.length)}</p>
       )}
-      {unmatchedInstalled.length > 0 && (
-        <details className="unmatched">
-          <summary>{c.needIds(unmatchedInstalled.length)}</summary>
-          <p className="hint">{c.needIdsHint(t.catalog.update)}</p>
-          {unmatchedInstalled.map((app) => (
-            <UnmatchedAppMapping
+      {device.installedApps.length > 0 && (
+        <details className="app-id-list">
+          <summary>{c.appIds(device.installedApps.length)}</summary>
+          <p className="hint">{c.appIdsHint(t.catalog.update)}</p>
+          {device.installedApps.map((app) => (
+            <InstalledAppDetails
               key={app.packageName}
               app={app}
               deviceId={device.id}

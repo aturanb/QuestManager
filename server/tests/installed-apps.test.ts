@@ -62,6 +62,24 @@ test("installed_apps inventory is persisted and catalog matches appear in snapsh
   assert.equal(installed[1].source, null);
 });
 
+test("an unmatched sideloaded app launches by Android package name", async () => {
+  const sentBeforeLaunch = sent.length;
+  const launch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${deviceId}/launch-installed`,
+    payload: { packageName: "com.example.unknown" },
+  });
+
+  assert.equal(launch.statusCode, 202);
+  const command = sent
+    .slice(sentBeforeLaunch)
+    .map((value) => JSON.parse(value))
+    .find((value) => value.type === "command");
+  assert.equal(command.payload.packageName, "com.example.unknown");
+  assert.equal(command.payload.gameName, "Unknown Game");
+  assert.equal("metaAppId" in command.payload, false);
+});
+
 test("admin can map an unknown installed package and launch it by package name", async () => {
   const mapped = await app.inject({
     method: "PUT",
@@ -83,13 +101,17 @@ test("admin can map an unknown installed package and launch it by package name",
   assert.equal(conflictingGame.statusCode, 409);
   assert.equal(conflictingGame.json().error, "package_already_mapped");
 
+  const sentBeforeLaunch = sent.length;
   const launch = await app.inject({
     method: "POST",
     url: `/api/devices/${deviceId}/launch-installed`,
     payload: { packageName: "com.example.unknown" },
   });
   assert.equal(launch.statusCode, 202);
-  const command = sent.map((value) => JSON.parse(value)).find((value) => value.type === "command");
+  const command = sent
+    .slice(sentBeforeLaunch)
+    .map((value) => JSON.parse(value))
+    .find((value) => value.type === "command");
   assert.equal(command.payload.metaAppId, "1234567890123456");
   assert.equal(command.payload.gameName, "My Local Game");
 

@@ -32,7 +32,8 @@ class AgentService : Service() {
         connections = AgentConnectionSupervisor {
             val identity = IdentityStore(this@AgentService).load()
             val launcher: AppLauncher = MetaAppLauncher(this@AgentService, identity.metaAppId)
-            AgentConnection(this@AgentService, identity, launcher, AgentRuntime.diagnostics)
+            val packageLauncher: PackageAppLauncher = AndroidPackageAppLauncher(this@AgentService)
+            AgentConnection(this@AgentService, identity, launcher, packageLauncher, AgentRuntime.diagnostics)
                 .also { Log.i(LOG_TAG, "agent connection configured for ${identity.deviceName}") }
         }
     }

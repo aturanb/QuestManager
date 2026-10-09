@@ -36,10 +36,16 @@ class AgentDiagnostics(
     fun setServiceRunning(running: Boolean) = _state.update { it.copy(serviceRunning = running) }
     fun setServer(server: ServerTarget) = _state.update { it.copy(server = server) }
 
-    suspend fun launch(payload: LaunchPayload, launcher: AppLauncher, command: String): LaunchOutcome {
+    suspend fun launch(
+        payload: LaunchPayload,
+        launcher: AppLauncher,
+        packageLauncher: PackageAppLauncher,
+        command: String,
+    ): LaunchOutcome {
         lastLaunch = payload
         _state.update { it.copy(lastCommand = command) }
-        val outcome = launcher.launch(payload.metaAppId)
+        val outcome = payload.metaAppId?.let { launcher.launch(it) }
+            ?: packageLauncher.launch(requireNotNull(payload.packageName))
         _state.update { state ->
             when (outcome) {
                 is LaunchOutcome.Success -> state.copy(
@@ -52,14 +58,14 @@ class AgentDiagnostics(
         return outcome
     }
 
-    suspend fun testLastLaunch(launcher: AppLauncher): LaunchOutcome {
+    suspend fun testLastLaunch(launcher: AppLauncher, packageLauncher: PackageAppLauncher): LaunchOutcome {
         val payload = lastLaunch
         if (payload == null) {
             val outcome = LaunchOutcome.Failed("NO_GAME_COMMAND_RECEIVED")
             _state.update { it.copy(lastCommand = "test_launch", lastResult = "FAILED ${outcome.error}") }
             return outcome
         }
-        return launch(payload, launcher, "test_launch ${payload.gameId}")
+        return launch(payload, launcher, packageLauncher, "test_launch ${payload.gameId}")
     }
 }
 

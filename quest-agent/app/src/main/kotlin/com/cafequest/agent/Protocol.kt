@@ -88,7 +88,12 @@ data class CommandResult(
 )
 
 @Serializable
-data class LaunchPayload(val gameId: String, val gameName: String, val metaAppId: String)
+data class LaunchPayload(
+    val gameId: String,
+    val gameName: String,
+    val metaAppId: String? = null,
+    val packageName: String? = null,
+)
 
 @Serializable
 data class ServerCommand(
@@ -104,5 +109,8 @@ fun parseLaunchCommand(raw: String): ServerCommand? {
     val cmd = runCatching { protocolJson.decodeFromString<ServerCommand>(raw) }.getOrNull()
     if (cmd?.type != "command" || cmd.command != "launch_app") return null
     if (cmd.protocolVersion != PROTOCOL_VERSION || cmd.payload == null) return null
+    val hasMetaTarget = !cmd.payload.metaAppId.isNullOrBlank()
+    val hasPackageTarget = !cmd.payload.packageName.isNullOrBlank()
+    if (hasMetaTarget == hasPackageTarget) return null
     return cmd
 }

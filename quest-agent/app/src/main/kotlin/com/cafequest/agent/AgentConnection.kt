@@ -30,6 +30,7 @@ class AgentConnection(
     private val context: Context,
     private val identity: AgentIdentity,
     private val launcher: AppLauncher,
+    private val packageLauncher: PackageAppLauncher,
     private val diagnostics: AgentDiagnostics = AgentRuntime.diagnostics,
     private val installedAppsProvider: () -> InstalledAppScanResult = { scanInstalledApps(context) },
     private val foregroundAppReader: ForegroundAppReader = AndroidForegroundAppReader(context),
@@ -91,7 +92,7 @@ class AgentConnection(
     }
 
     override suspend fun testLastLaunch() {
-        diagnostics.testLastLaunch(launcher)
+        diagnostics.testLastLaunch(launcher, packageLauncher)
     }
 
     private suspend fun loop() {
@@ -187,7 +188,7 @@ class AgentConnection(
         val payload = cmd.payload ?: return
         ws.send(protocolJson.encodeToString(CommandAck(commandId = cmd.commandId, deviceId = identity.deviceId)))
         Log.i(LOG_TAG, "acknowledged ${cmd.commandId}")
-        val outcome = diagnostics.launch(payload, launcher, "launch_app ${payload.gameId}")
+        val outcome = diagnostics.launch(payload, launcher, packageLauncher, "launch_app ${payload.gameId}")
         val result = when (outcome) {
             is LaunchOutcome.Success -> {
                 CommandResult(commandId = cmd.commandId, status = "success", deviceId = identity.deviceId)

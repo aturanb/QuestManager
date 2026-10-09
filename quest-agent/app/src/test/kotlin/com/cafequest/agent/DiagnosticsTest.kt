@@ -25,8 +25,9 @@ class DiagnosticsTest {
     @Test fun `test launch without a previous game reports a useful failure`() = runTest {
         val diagnostics = AgentDiagnostics { "2026-01-02T03:04:05Z" }
         val launcher = FakeAppLauncher()
+        val packageLauncher = FakePackageAppLauncher()
 
-        val outcome = diagnostics.testLastLaunch(launcher)
+        val outcome = diagnostics.testLastLaunch(launcher, packageLauncher)
 
         assertTrue(outcome is LaunchOutcome.Failed)
         assertEquals("NO_GAME_COMMAND_RECEIVED", (outcome as LaunchOutcome.Failed).error)
@@ -39,16 +40,35 @@ class DiagnosticsTest {
     @Test fun `test launch retries the most recently received game`() = runTest {
         val diagnostics = AgentDiagnostics { "2026-01-02T03:04:05Z" }
         val launcher = FakeAppLauncher()
+        val packageLauncher = FakePackageAppLauncher()
         val payload = LaunchPayload("beat-saber", "Beat Saber", "test-beat-saber")
 
-        assertTrue(diagnostics.launch(payload, launcher, "launch_app beat-saber") is LaunchOutcome.Success)
-        assertTrue(diagnostics.testLastLaunch(launcher) is LaunchOutcome.Success)
+        assertTrue(diagnostics.launch(payload, launcher, packageLauncher, "launch_app beat-saber") is LaunchOutcome.Success)
+        assertTrue(diagnostics.testLastLaunch(launcher, packageLauncher) is LaunchOutcome.Success)
 
         assertEquals(listOf("test-beat-saber", "test-beat-saber"), launcher.launched)
         assertEquals("test_launch beat-saber", diagnostics.state.value.lastCommand)
         assertEquals("SUCCESS", diagnostics.state.value.lastResult)
         assertEquals("Beat Saber", diagnostics.state.value.expectedGame?.name)
         assertEquals("2026-01-02T03:04:05Z", diagnostics.state.value.expectedGame?.launchedAt)
+    }
+
+    @Test fun `package launch uses the Android launcher instead of the Meta launcher`() = runTest {
+        val diagnostics = AgentDiagnostics { "2026-01-02T03:04:05Z" }
+        val metaLauncher = FakeAppLauncher()
+        val packageLauncher = FakePackageAppLauncher(setOf("com.example.local"))
+        val payload = LaunchPayload(
+            gameId = "installed:com.example.local",
+            gameName = "Local App",
+            packageName = "com.example.local",
+        )
+
+        val outcome = diagnostics.launch(payload, metaLauncher, packageLauncher, "launch_app local")
+
+        assertEquals(LaunchOutcome.Success, outcome)
+        assertTrue(metaLauncher.launched.isEmpty())
+        assertEquals(listOf("com.example.local"), packageLauncher.launched)
+        assertEquals("Local App", diagnostics.state.value.expectedGame?.name)
     }
 
     @Test fun `diagnostics carries the server the agent dials`() {
