@@ -4,6 +4,7 @@ import { LiveViewModal, type LiveViewModalProps } from "./LiveViewModal";
 import { LangProvider } from "../i18n";
 import { messages } from "../messages";
 import { renderTurkish } from "../test-utils";
+import type { Device, Game } from "../types";
 
 beforeAll(() => {
   // jsdom has no media pipeline; autoplay rejection must never fail the stream.
@@ -24,6 +25,114 @@ function props(over: Partial<LiveViewModalProps> = {}): LiveViewModalProps {
     ...over,
   };
 }
+
+function quest(over: Partial<Device> = {}): Device {
+  return {
+    id: "dev-1",
+    name: "Quest 01",
+    model: "Quest 3",
+    agentVersion: "0.5.0",
+    lastSeenAt: new Date().toISOString(),
+    batteryLevel: 80,
+    charging: false,
+    expectedGame: null,
+    usageAccessGranted: true,
+    foregroundApp: null,
+    online: true,
+    session: null,
+    lastCommand: null,
+    installedApps: [
+      { packageName: "com.fun.beat", label: "Beat", versionName: null, versionCode: null, name: "Beat Saber", metaAppId: "111", source: "catalog" },
+      { packageName: "com.fun.cook", label: "Cook", versionName: null, versionCode: null, name: "Cook Out", metaAppId: "222", source: "catalog" },
+    ],
+    supportsScreenCast: true,
+    controllerBattery: null,
+    ...over,
+  };
+}
+
+const cafeGames: Game[] = [{ id: "g-1", name: "Café Pong", metaAppId: "333", enabled: true }];
+
+function launchProps(over: Partial<NonNullable<LiveViewModalProps["launch"]>> = {}): NonNullable<LiveViewModalProps["launch"]> {
+  return {
+    device: quest(),
+    games: cafeGames,
+    pendingCommandId: null,
+    busy: false,
+    error: null,
+    onLaunch: vi.fn(),
+    onLaunchInstalled: vi.fn(),
+    ...over,
+  };
+}
+
+describe("LiveViewModal launch options", () => {
+  it("launches an installed app on the headset without leaving the live view", () => {
+    const launch = launchProps();
+    render(<LiveViewModal {...props({ state: { phase: "live" }, launch })} />, { wrapper: LangProvider });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Game for Quest 01" }), { target: { value: "pkg:com.fun.cook" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch game on Quest 01" }));
+
+    expect(launch.onLaunchInstalled).toHaveBeenCalledWith("dev-1", "com.fun.cook");
+    expect(launch.onLaunch).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Live screen of Quest 01")).toBeInTheDocument();
+  });
+
+  it("launches a café game from the same picker", () => {
+    const launch = launchProps();
+    render(<LiveViewModal {...props({ state: { phase: "live" }, launch })} />, { wrapper: LangProvider });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Game for Quest 01" }), { target: { value: "game:g-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Launch game on Quest 01" }));
+
+    expect(launch.onLaunch).toHaveBeenCalledWith("dev-1", "g-1");
+  });
+
+  it("stays out of the way while minimized and when no launch data is given", () => {
+    const view = render(<LiveViewModal {...props({ state: { phase: "live" }, launch: launchProps() })} />, { wrapper: LangProvider });
+    fireEvent.click(screen.getByRole("button", { name: "Minimize the live view of Quest 01" }));
+    expect(screen.queryByRole("combobox", { name: "Game for Quest 01" })).not.toBeInTheDocument();
+    view.unmount();
+
+    render(<LiveViewModal {...props({ state: { phase: "live" } })} />, { wrapper: LangProvider });
+    expect(screen.queryByRole("combobox", { name: "Game for Quest 01" })).not.toBeInTheDocument();
+  });
+
+  it("is offered in a failed session too, so staff can still start an app", () => {
+    render(<LiveViewModal {...props({ state: { phase: "failed", error: "consent_denied" }, launch: launchProps() })} />, { wrapper: LangProvider });
+    expect(screen.getByRole("button", { name: "Launch game on Quest 01" })).toBeEnabled();
+  });
+
+  it("cannot launch while the headset is offline or a launch is in flight", () => {
+    const view = render(
+      <LiveViewModal {...props({ state: { phase: "live" }, launch: launchProps({ device: quest({ online: false }) }) })} />,
+      { wrapper: LangProvider }
+    );
+    expect(screen.getByRole("button", { name: "Launch game on Quest 01" })).toBeDisabled();
+    view.unmount();
+
+    render(<LiveViewModal {...props({ state: { phase: "live" }, launch: launchProps({ busy: true }) })} />, { wrapper: LangProvider });
+    expect(screen.getByRole("button", { name: "Launch game on Quest 01" })).toBeDisabled();
+  });
+
+  it("reports the launch result and a failed request next to the picker", () => {
+    const device = quest({ lastCommand: { id: "cmd-1", status: "success", error: null } });
+    render(
+      <LiveViewModal {...props({ state: { phase: "live" }, launch: launchProps({ device, pendingCommandId: "cmd-1", error: "Could not reach the server" }) })} />,
+      { wrapper: LangProvider }
+    );
+    expect(screen.getByText("Launched ✓")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not reach the server");
+  });
+
+  it("speaks Turkish in the launch section", () => {
+    renderTurkish(<LiveViewModal {...props({ deviceName: "Quest 01", state: { phase: "live" }, launch: launchProps() })} />);
+    expect(screen.getByRole("combobox", { name: "Quest 01 için oyun" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quest 01 gözlüğünde oyunu aç" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Uygulama aç" })).toBeInTheDocument();
+  });
+});
 
 describe("LiveViewModal", () => {
   it("is a non-modal live region that leaves the dashboard available", () => {
@@ -47,6 +156,18 @@ describe("LiveViewModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Expand the live view of Quest 01" }));
     expect(screen.getByLabelText("Live screen of Quest 01")).toBeInTheDocument();
+  });
+
+  it("shows the picture again after minimizing and expanding the live view", () => {
+    const stream = { id: "remote-stream" } as unknown as MediaStream;
+    render(<LiveViewModal {...props({ state: { phase: "live" }, stream })} />, { wrapper: LangProvider });
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize the live view of Quest 01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand the live view of Quest 01" }));
+
+    const video = screen.getByLabelText("Live screen of Quest 01") as HTMLVideoElement;
+    expect(video.srcObject).toBe(stream);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
   });
 
   it("asks staff to have the customer approve on the headset", () => {

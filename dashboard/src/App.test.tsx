@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "./App";
 import type { CastClient, CastClientOptions } from "./casting";
 import { LANG_STORAGE, LangProvider } from "./i18n";
@@ -139,6 +139,9 @@ function stubCastBoard(devices: Device[]) {
     if (path.startsWith("/api/casts/") && init?.method === "DELETE") {
       return Promise.resolve(new Response(null, { status: 204 }));
     }
+    if (path.endsWith("/launch-installed") && init?.method === "POST") {
+      return Promise.resolve(new Response(JSON.stringify({ commandId: "cmd-1", status: "sent" }), { status: 202 }));
+    }
     if (path === "/api/devices") {
       return Promise.resolve(
         new Response(JSON.stringify({ serverTime: new Date().toISOString(), devices }), { status: 200 })
@@ -151,16 +154,26 @@ function stubCastBoard(devices: Device[]) {
     return Promise.resolve(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
   });
   vi.stubGlobal("fetch", fetchMock);
+  let liveSocket: { onmessage: ((event: MessageEvent<string>) => void) | null } | null = null;
   vi.stubGlobal(
     "WebSocket",
     class {
-      onmessage: unknown = null;
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
       onclose: unknown = null;
+      constructor() {
+        liveSocket = this;
+      }
       close() {}
     }
   );
   return {
     calls,
+    /** A dashboard-ws state push, as when the headset reports a new foreground app. */
+    push: (nextDevices: Device[]) =>
+      liveSocket?.onmessage?.({
+        data: JSON.stringify({ type: "state", payload: { serverTime: new Date().toISOString(), devices: nextDevices } }),
+      } as MessageEvent<string>),
+    launchCalls: () => calls.filter((call) => call.path.endsWith("/launch-installed")),
     resolveCast: (body: unknown, status = 201) => {
       const resolve = resolveCast;
       resolveCast = null;
@@ -593,6 +606,116 @@ describe("App", () => {
     await waitFor(() => expect(cast.clients).toHaveLength(1));
     view.unmount();
     expect(cast.last().closed).toBe(1);
+  });
+
+  describe("live view with launch options and the reopen prompt", () => {
+    const stamp = new Date().toISOString();
+    const BEAT = { packageName: "com.fun.beat", name: "Beat Saber", startedAt: stamp };
+    const COOK = { packageName: "com.fun.cook", name: "Cook Out", startedAt: stamp };
+    const CAFEQUEST = { packageName: "com.cafequest.agent", name: "CafeQuest", startedAt: stamp };
+    const installedApps = [BEAT, COOK].map((app) => ({
+      packageName: app.packageName,
+      label: app.name,
+      versionName: null,
+      versionCode: null,
+      name: app.name,
+      metaAppId: "111",
+      source: "catalog" as const,
+    }));
+    const quest = (foregroundApp: Device["foregroundApp"], over: Partial<Device> = {}) =>
+      device("d1", "Quest 01", { supportsScreenCast: true, installedApps, foregroundApp, ...over });
+
+    async function startLive(foregroundApp: Device["foregroundApp"]) {
+      const board = stubCastBoard([quest(foregroundApp)]);
+      const cast = fakeCastFactory();
+      render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+      fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+      await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+      await waitFor(() => expect(cast.clients).toHaveLength(1));
+      act(() => cast.last().options.callbacks.onState({ phase: "live" }));
+      return { board, cast };
+    }
+    const panel = () => screen.getByRole("complementary", { name: "Live view of Quest 01" });
+
+    it("launches an app from the live panel on that headset only", async () => {
+      const { board } = await startLive(BEAT);
+
+      fireEvent.change(within(panel()).getByRole("combobox", { name: "Game for Quest 01" }), { target: { value: "pkg:com.fun.cook" } });
+      fireEvent.click(within(panel()).getByRole("button", { name: "Launch game on Quest 01" }));
+
+      await waitFor(() => expect(board.launchCalls()).toHaveLength(1));
+      expect(board.launchCalls()[0]?.path).toBe("/api/devices/d1/launch-installed");
+      expect(JSON.parse(String(board.launchCalls()[0]?.init?.body))).toEqual({ packageName: "com.fun.cook" });
+      expect(await within(panel()).findByText("Launching…")).toBeInTheDocument();
+      expect(screen.getByRole("complementary", { name: "Live view of Quest 01" })).toBeInTheDocument();
+    });
+
+    it("offers to reopen the app that was open before the live view, and opens it on Yes", async () => {
+      const { board, cast } = await startLive(BEAT);
+      act(() => board.push([quest(CAFEQUEST)]));
+
+      fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
+
+      expect(screen.queryByRole("complementary", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+      expect(cast.last().closed).toBe(1);
+      const prompt = screen.getByRole("alertdialog", { name: "Live view ended" });
+      expect(prompt).toHaveTextContent("Reopen Beat Saber on Quest 01?");
+
+      fireEvent.click(within(prompt).getByRole("button", { name: "Open Beat Saber on Quest 01 again" }));
+      await waitFor(() => expect(board.launchCalls()).toHaveLength(1));
+      expect(JSON.parse(String(board.launchCalls()[0]?.init?.body))).toEqual({ packageName: "com.fun.beat" });
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+
+    it("No closes the prompt without launching anything", async () => {
+      const { board } = await startLive(BEAT);
+      act(() => board.push([quest(CAFEQUEST)]));
+      fireEvent.click(within(panel()).getByRole("button", { name: "Close the live view of Quest 01" }));
+
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "No" }));
+
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(board.launchCalls()).toHaveLength(0);
+    });
+
+    it("offers the latest app when staff launched another one during the stream", async () => {
+      const { board } = await startLive(BEAT);
+      act(() => board.push([quest(COOK)]));
+      act(() => board.push([quest(CAFEQUEST)]));
+
+      fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
+
+      expect(screen.getByRole("alertdialog")).toHaveTextContent("Reopen Cook Out on Quest 01?");
+    });
+
+    it("stays quiet when the app is still in front, or nothing but CafeQuest was open", async () => {
+      const first = await startLive(BEAT);
+      fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(first.board.launchCalls()).toHaveLength(0);
+      cleanup();
+
+      await startLive(CAFEQUEST);
+      fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+
+    it("does not ask again on Try again, and a new live view clears an old prompt", async () => {
+      const { board, cast } = await startLive(BEAT);
+      act(() => board.push([quest(CAFEQUEST)]));
+      act(() => cast.last().options.callbacks.onState({ phase: "failed", error: "peer_disconnected" }));
+      fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      await act(async () => board.resolveCast({ sessionId: "s2", status: "reserved" }));
+      await waitFor(() => expect(cast.clients).toHaveLength(2));
+      act(() => cast.last().options.callbacks.onState({ phase: "live" }));
+
+      fireEvent.click(within(panel()).getByRole("button", { name: "Stop live view" }));
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Request live view of Quest 01" }));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
   });
 
   it("does not offer a live view while the headset is offline or the agent is old", async () => {

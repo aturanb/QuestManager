@@ -2,6 +2,21 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { CastViewState } from "../casting";
 import { castErrorText } from "../errors";
 import { useI18n } from "../i18n";
+import type { Device, Game } from "../types";
+import { BADGE_TONE, badgeText, launchStatus } from "./DeviceCard";
+import { LaunchSelect, launchSelected, useLaunchPicker } from "./LaunchPicker";
+
+/** What the panel needs to start an app on the headset being watched. */
+export type LiveViewLaunch = {
+  device: Device;
+  games: Game[];
+  pendingCommandId: string | null;
+  /** A launch request is already in flight for this headset. */
+  busy: boolean;
+  error: string | null;
+  onLaunch: (deviceId: string, gameId: string) => void;
+  onLaunchInstalled: (deviceId: string, packageName: string) => void;
+};
 
 export type LiveViewModalProps = {
   deviceName: string;
@@ -11,6 +26,8 @@ export type LiveViewModalProps = {
   onStop: () => void;
   onRetry: () => void;
   onClose: () => void;
+  /** Lets staff start an app while the stream runs, so the panel never needs minimizing. */
+  launch?: LiveViewLaunch;
 };
 
 /**
@@ -18,13 +35,14 @@ export type LiveViewModalProps = {
  * directly; the remote MediaStream is attached to the <video> element and never
  * copied into application state.
  */
-export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onClose }: LiveViewModalProps) {
+export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onClose, launch }: LiveViewModalProps) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [noPicture, setNoPicture] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const contentId = useId();
 
+  // Minimizing unmounts the <video>, so expanding must attach the stream to the new element.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -42,7 +60,7 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
         /* already detached */
       }
     };
-  }, [state.phase, stream]);
+  }, [state.phase, stream, minimized]);
 
   // A game that blocks capture yields no track; say so instead of failing the session.
   useEffect(() => {
@@ -137,8 +155,43 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
                 </button>
               )}
             </div>
+
+            {launch && <LaunchSection launch={launch} />}
           </div>
         )}
       </aside>
+  );
+}
+
+function LaunchSection({ launch }: { launch: LiveViewLaunch }) {
+  const { t } = useI18n();
+  const c = t.card;
+  const { device } = launch;
+  const picker = useLaunchPicker(device, launch.games);
+  const status = launchStatus(launch.pendingCommandId, device);
+  const canLaunch = device.online && !launch.busy && picker.selected !== "";
+  const headingId = useId();
+  return (
+    <section className="cast-launch" aria-labelledby={headingId}>
+      <h3 id={headingId}>{t.cast.launchHeading}</h3>
+      <div className="controls launch">
+        <LaunchSelect picker={picker} ariaLabel={c.gameFor(device.name)} disabled={!device.online || launch.busy} />
+        <button
+          className="btn btn-primary"
+          aria-label={c.launchLabel(device.name)}
+          disabled={!canLaunch}
+          title={!device.online ? c.headsetOffline : undefined}
+          onClick={() => launchSelected(picker.selected, device.id, launch)}
+        >
+          {c.launch}
+        </button>
+      </div>
+      {status && (
+        <p className="note" data-tone={BADGE_TONE[status.kind]} role="status" aria-live="polite">
+          {badgeText(status, c)}
+        </p>
+      )}
+      {launch.error && <p className="note" data-tone="bad" role="alert">{launch.error}</p>}
+    </section>
   );
 }

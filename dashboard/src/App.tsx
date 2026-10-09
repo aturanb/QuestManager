@@ -27,8 +27,10 @@ import { DeviceCard } from "./components/DeviceCard";
 import { KeyPrompt } from "./components/KeyPrompt";
 import { LangToggle } from "./components/LangToggle";
 import { LiveViewModal } from "./components/LiveViewModal";
+import { ResumeAppPrompt } from "./components/ResumeAppPrompt";
 import { SelectionBar } from "./components/SelectionBar";
 import { castRequestError, friendlyError } from "./errors";
+import { resumableApp, shouldOfferResume, type ResumeApp } from "./resume-app";
 import { useI18n } from "./i18n";
 
 const KEY_STORAGE = "cq-admin-key";
@@ -44,6 +46,9 @@ type ActiveLiveView = {
   state: CastViewState;
   stream: MediaStream | null;
 };
+
+/** Asked once after staff end a live view whose app is no longer in front. */
+type ResumePrompt = { deviceId: string; deviceName: string; app: ResumeApp };
 
 export type AppProps = {
   /** Injected in tests; defaults to the real signaling/WebRTC client. */
@@ -84,6 +89,9 @@ export function App({ castFactory }: AppProps = {}) {
   const castActiveRef = useRef(false);
   /** Bumped on close/unmount so a late reservation or callback cannot revive a dead flow. */
   const castGenerationRef = useRef(0);
+  const [resumePrompt, setResumePrompt] = useState<ResumePrompt | null>(null);
+  /** The latest customer app seen in front during the live view; CafeQuest itself never counts. */
+  const resumeAppRef = useRef<ResumeApp | null>(null);
   const makeCastClient = castFactory ?? ((options: CastClientOptions) => new CastClient(options));
 
   const applySnapshot = useCallback((snap: Snapshot) => {
@@ -201,10 +209,13 @@ export function App({ castFactory }: AppProps = {}) {
 
   // The modal opens before the POST resolves; a closed modal still releases the slot.
   const startLiveView = useCallback(
-    async (device: Device) => {
+    async (device: Device, options: { keepResume?: boolean } = {}) => {
       if (castActiveRef.current) return;
       castActiveRef.current = true;
       const generation = ++castGenerationRef.current;
+      // A retry is the same support visit: the game seen before it must survive CafeQuest being in front now.
+      resumeAppRef.current = resumableApp(device) ?? (options.keepResume ? resumeAppRef.current : null);
+      setResumePrompt(null);
       setLiveView({ deviceId: device.id, deviceName: device.name, state: { phase: "connecting" }, stream: null });
       let reservation: { sessionId: string };
       try {
@@ -248,12 +259,31 @@ export function App({ castFactory }: AppProps = {}) {
     [closeLiveView, demandKey, makeCastClient]
   );
 
+  // Keep the freshest customer app: staff may launch another one from the panel mid-stream.
+  const liveDeviceId = liveView?.deviceId ?? null;
+  useEffect(() => {
+    if (liveDeviceId === null) return;
+    const app = resumableApp(devices.find((d) => d.id === liveDeviceId));
+    if (app) resumeAppRef.current = app;
+  }, [devices, liveDeviceId]);
+
+  /** Staff ended the stream: close it, then offer to bring the customer's app back. */
+  const endLiveView = useCallback(() => {
+    if (!liveView) return;
+    const device = devices.find((d) => d.id === liveView.deviceId);
+    const resume = resumeAppRef.current;
+    closeLiveView();
+    if (resume && shouldOfferResume(resume, device)) {
+      setResumePrompt({ deviceId: liveView.deviceId, deviceName: liveView.deviceName, app: resume });
+    }
+  }, [liveView, devices, closeLiveView]);
+
   const retryLiveView = useCallback(() => {
     const current = liveView;
     if (!current) return;
     const device = devices.find((d) => d.id === current.deviceId);
     closeLiveView();
-    if (device) void startLiveView(device);
+    if (device) void startLiveView(device, { keepResume: true });
   }, [devices, liveView, closeLiveView, startLiveView]);
 
   // Unmounting the board ends any capture this tab owns.
@@ -534,9 +564,36 @@ export function App({ castFactory }: AppProps = {}) {
           deviceName={liveView.deviceName}
           state={liveView.state}
           stream={liveView.stream}
-          onStop={closeLiveView}
+          onStop={endLiveView}
           onRetry={retryLiveView}
-          onClose={closeLiveView}
+          onClose={endLiveView}
+          launch={(() => {
+            const device = devices.find((d) => d.id === liveView.deviceId);
+            if (!device) return undefined;
+            return {
+              device,
+              games,
+              pendingCommandId: pending[device.id] ?? null,
+              busy: !!busy[device.id],
+              error: cardErrors[device.id] != null ? friendlyError(cardErrors[device.id], t) : null,
+              onLaunch: (deviceId: string, gameId: string) => void runCardAction(deviceId, () => launchGame(key, deviceId, gameId)),
+              onLaunchInstalled: (deviceId: string, packageName: string) =>
+                void runCardAction(deviceId, () => launchInstalledApp(key, deviceId, packageName)),
+            };
+          })()}
+        />
+      )}
+      {resumePrompt && (
+        <ResumeAppPrompt
+          deviceName={resumePrompt.deviceName}
+          appName={resumePrompt.app.name}
+          canOpen={devices.find((d) => d.id === resumePrompt.deviceId)?.online === true}
+          onDismiss={() => setResumePrompt(null)}
+          onConfirm={() => {
+            const { deviceId, app } = resumePrompt;
+            setResumePrompt(null);
+            void runCardAction(deviceId, () => launchInstalledApp(key, deviceId, app.packageName));
+          }}
         />
       )}
     </>

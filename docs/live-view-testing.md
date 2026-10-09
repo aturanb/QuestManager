@@ -123,10 +123,18 @@ Put a managed game in the foreground, then:
 10. Refuse consent once (row 30) and let one request time out by tapping nothing
    for a minute (row 31): the dashboard must show the failure instead of a stuck
    spinner, and the next request asks for consent again.
-11. Repeat 2–5 with two more apps, including a 2D panel app (row 32). A black
+11. Launch and reopen, from the dashboard viewer: while live, pick an app in the
+    viewer's **Launch an app** list and press Launch (the stream must keep running
+    and the card shows the usual launch status). Minimize and expand the viewer: the
+    picture must come back, not stay black. Then press **Stop live view** while
+    CafeQuest, not the game, is in front (the manual-button flow): a prompt must
+    offer to reopen the app that was open before (or the one staff launched last),
+    and **Yes, open it** must bring it to the front. No prompt is expected when that
+    app is still in front. UNVERIFIED_HARDWARE.
+12. Repeat 2–5 with two more apps, including a 2D panel app (row 32). A black
     frame means that title sets `FLAG_SECURE`; nothing can be changed from the
     CafeQuest side, so record it as-is.
-12. Isolation checks: with a session Live, a second card's **Request live view**
+13. Isolation checks: with a session Live, a second card's **Request live view**
     is refused (`busy`) → row 34; sleeping the headset (35), dropping its Wi-Fi
     (36), reloading the dashboard (37), restarting the agent so a duplicate hello
     replaces the socket (38), and force-stopping/reopening CafeQuest (39) must

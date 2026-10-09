@@ -409,6 +409,10 @@ input::placeholder { color: var(--chalk-dim); }
 .cast-video video { width: 100%; height: 100%; object-fit: contain; }
 .cast-video .note { position: absolute; inset: auto 10px 10px 10px; margin: 0; }
 .cast-controls { justify-content: flex-end; }
+.cast-launch { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--rail); }
+.cast-launch h3 { font-size: 0.95rem; font-weight: 650; }
+.resume-prompt { width: min(440px, calc(100vw - 2 * var(--gutter))); }
+.resume-prompt h2 { font-size: 1.15rem; font-weight: 650; }
 
 /* ---- page states ------------------------------------------------------------ */
 .banner {

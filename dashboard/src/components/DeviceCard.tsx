@@ -3,6 +3,7 @@ import type { Device, DeviceControllerBattery, Game, InstalledApp } from "../typ
 import { bayState, type BayState } from "../bay";
 import { useI18n, type Messages } from "../i18n";
 import { formatAgo, formatElapsedSince, formatRemaining } from "../time";
+import { LaunchSelect, launchSelected, useLaunchPicker } from "./LaunchPicker";
 
 export type DeviceCardProps = {
   device: Device;
@@ -102,14 +103,14 @@ export function launchStatus(pendingCommandId: string | null, device: Device): L
 }
 
 // Tone follows the state, never the words, so it survives a language switch.
-const BADGE_TONE: Record<LaunchStatus["kind"], "ok" | "bad" | "wait"> = {
+export const BADGE_TONE: Record<LaunchStatus["kind"], "ok" | "bad" | "wait"> = {
   launching: "wait",
   launched: "ok",
   failed: "bad",
   timeout: "bad",
 };
 
-function badgeText(status: LaunchStatus, t: Messages["card"]): string {
+export function badgeText(status: LaunchStatus, t: Messages["card"]): string {
   switch (status.kind) {
     case "launching":
       return t.launching;
@@ -121,13 +122,6 @@ function badgeText(status: LaunchStatus, t: Messages["card"]): string {
       return t.timedOut;
   }
 }
-
-/** Mirrors the server's isPlaceholderAppId: launches of these are refused, so they are not offered. */
-function needsAppId(metaAppId: string): boolean {
-  return !metaAppId.trim() || metaAppId === "UNCONFIGURED" || metaAppId.includes("FILL_");
-}
-
-type LaunchChoice = { value: string; label: string; disabled: boolean };
 
 /**
  * Left/right Touch controller levels beside the headset battery. Only rendered
@@ -253,40 +247,17 @@ export function DeviceCard(props: DeviceCardProps) {
   const activeSession =
     state.kind === "playing" || state.kind === "ending" || state.kind === "unlimited" ? device.session : null;
   const [customMin, setCustomMin] = useState("45");
-  const [picked, setPicked] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const status = launchStatus(props.pendingCommandId, device);
 
-  // One picker for both launch paths: catalog matches use Meta's API; anything
-  // else falls back to its Android package name on the headset.
-  const installedChoices: LaunchChoice[] = device.installedApps.map((app) => ({
-    value: `pkg:${app.packageName}`,
-    label: app.metaAppId === null ? c.androidPackageChoice(app.name) : app.name,
-    disabled: false,
-  }));
-  const gameChoices: LaunchChoice[] = games
-    .filter((g) => g.enabled)
-    .map((g) => {
-      const blocked = needsAppId(g.metaAppId);
-      return { value: `game:${g.id}`, label: blocked ? c.needsAppId(g.name) : g.name, disabled: blocked };
-    });
-  const launchable = [...installedChoices, ...gameChoices].filter((choice) => !choice.disabled);
-  const lastLaunched = device.expectedGame
-    ? device.expectedGame.gameId.startsWith("installed:")
-      ? `pkg:${device.expectedGame.gameId.slice("installed:".length)}`
-      : `game:${device.expectedGame.gameId}`
-    : null;
-  const fallback = launchable.find((choice) => choice.value === lastLaunched)?.value ?? launchable[0]?.value ?? "";
-  // A pick that vanished (app uninstalled, game disabled) falls back instead of launching stale.
-  const selected = picked !== null && launchable.some((choice) => choice.value === picked) ? picked : fallback;
-  const selectedLabel = launchable.find((choice) => choice.value === selected)?.label ?? "";
+  const picker = useLaunchPicker(device, games);
+  const { selected, selectedLabel } = picker;
   const canLaunch = device.online && !props.busy && selected !== "";
   const actionTargetCount = props.selected === true ? props.actionTargetCount ?? 0 : 0;
   const targetsSelection = actionTargetCount > 0;
 
   function launch() {
-    if (selected.startsWith("pkg:")) props.onLaunchInstalled(device.id, selected.slice("pkg:".length));
-    else if (selected.startsWith("game:")) props.onLaunch(device.id, selected.slice("game:".length));
+    launchSelected(selected, device.id, props);
   }
 
   // A disconnected headset's last report is stale; don't present it as what is open now.
@@ -445,26 +416,7 @@ export function DeviceCard(props: DeviceCardProps) {
       )}
 
       <div className="controls launch">
-        <select
-          aria-label={c.gameFor(device.name)}
-          value={selected}
-          onChange={(event) => setPicked(event.target.value)}
-          disabled={!device.online || props.busy || launchable.length === 0}
-        >
-          {launchable.length === 0 && <option value="">{c.noGamesReady}</option>}
-          {installedChoices.length > 0 && (
-            <optgroup label={c.installedGroup}>
-              {installedChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
-            </optgroup>
-          )}
-          {gameChoices.length > 0 && (
-            <optgroup label={c.cafeGroup}>
-              {gameChoices.map((choice) => (
-                <option key={choice.value} value={choice.value} disabled={choice.disabled}>{choice.label}</option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+        <LaunchSelect picker={picker} ariaLabel={c.gameFor(device.name)} disabled={!device.online || props.busy} />
         <button
           className="btn btn-primary"
           aria-label={targetsSelection && selectedLabel
