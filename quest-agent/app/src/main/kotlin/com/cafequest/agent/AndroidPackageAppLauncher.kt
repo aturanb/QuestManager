@@ -27,7 +27,7 @@ class AndroidPackageAppLauncher(
 
     override suspend fun launch(packageName: String): LaunchOutcome = try {
         if (driver.launch(packageName)) LaunchOutcome.Success
-        else LaunchOutcome.Failed("TARGET_NOT_INSTALLED")
+        else LaunchOutcome.Failed("TARGET_NOT_LAUNCHABLE")
     } catch (error: Exception) {
         LaunchOutcome.Failed(error.message?.take(200) ?: "PACKAGE_LAUNCH_FAILED")
     }

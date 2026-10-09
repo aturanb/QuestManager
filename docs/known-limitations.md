@@ -55,7 +55,9 @@
 - **Direct package launch still needs a physical Quest check**: the agent uses
   Android's Leanback/launcher intent for apps without a Meta App ID. Unit tests
   cover routing and errors, but Quest background-activity policy may differ;
-  morning-test row 5a is the acceptance check.
+  morning-test row 5a is the acceptance check. Installed helper/service APKs
+  without a front-door activity remain visible but fail with
+  `TARGET_NOT_LAUNCHABLE` when selected.
 - **Model is whatever the headset reports**: the card's **Model** row shows
   Android's `Build.MODEL` from the agent's hello. A Quest 3 reports "Quest 3"
   (seen on hardware); what a Quest 2, Pro or 3S reports is UNVERIFIED. The

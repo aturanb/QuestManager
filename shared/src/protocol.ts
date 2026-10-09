@@ -2,7 +2,9 @@ import { z } from "zod";
 
 export const PROTOCOL_VERSION = 1;
 export const LAUNCH_ANDROID_PACKAGE_CAPABILITY = "launch_android_package" as const;
-export const AgentCapabilitySchema = z.enum([LAUNCH_ANDROID_PACKAGE_CAPABILITY]);
+// Capability negotiation is intentionally open-ended: old servers ignore
+// names they do not understand instead of rejecting a newer protocol-v1 agent.
+export const AgentCapabilitySchema = z.string().min(1).max(64).regex(/^[a-z][a-z0-9_]*$/);
 
 /** A game CafeQuest requested to launch; distinct from "the true foreground game". */
 export const ExpectedGameSchema = z.object({

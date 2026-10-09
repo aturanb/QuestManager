@@ -17,7 +17,7 @@ class PackageLauncherTest {
         val missing = launcher.launch("com.example.missing")
 
         assertTrue(missing is LaunchOutcome.Failed)
-        assertEquals("TARGET_NOT_INSTALLED", (missing as LaunchOutcome.Failed).error)
+        assertEquals("TARGET_NOT_LAUNCHABLE", (missing as LaunchOutcome.Failed).error)
         assertEquals(listOf("com.example.installed", "com.example.missing"), started)
     }
 

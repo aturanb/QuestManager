@@ -46,7 +46,9 @@ test("hello advertises package-launch support without breaking older agents", ()
 
   assert.equal(capable.success, true);
   if (capable.success) assert.deepEqual(capable.data.capabilities, ["launch_android_package"]);
-  assert.equal(HelloSchema.safeParse({ ...hello, capabilities: ["unknown_capability"] }).success, false);
+  const future = HelloSchema.safeParse({ ...hello, capabilities: ["future_capability"] });
+  assert.equal(future.success, true);
+  if (future.success) assert.deepEqual(future.data.capabilities, ["future_capability"]);
   assert.equal(HelloSchema.safeParse(hello).success, true);
 });
 
