@@ -29,6 +29,7 @@ import { isAdminAuthorized, isDashboardSocketAuthorized, type AuthConfig } from 
 import { defaultCatalogPath, loadAppCatalog } from "./catalog.js";
 import { CATALOG_SOURCE_URL, catalogFetchedAt, refreshAppCatalog } from "./catalog-refresh.js";
 import { manualGameId, resolveInstalledApp } from "./installed-apps.js";
+import { serverDisplayName, startDiscoveryResponder } from "./discovery.js";
 
 export type AppConfig = {
   dbPath: string;
@@ -42,6 +43,8 @@ export type AppConfig = {
   appCatalogPath?: string;
   /** Injected in tests so the catalog refresh route never reaches the network. */
   catalogFetch?: typeof fetch;
+  /** UDP port answering headset discovery probes (DISCOVERY_PORT from index.ts); unset = off, tests opt in with 0. */
+  discoveryPort?: number;
   logger?: { level?: string; stream?: NodeJS.WritableStream };
 };
 
@@ -77,6 +80,20 @@ export async function buildApp(cfg: AppConfig) {
 
   const hub = new Hub(app, db, () => appCatalog, () => {});
   hub.start();
+
+  // Headsets in Auto mode find this server by broadcasting a probe (spec 2026-10-09 §2).
+  const discovery = cfg.discoveryPort === undefined
+    ? null
+    : await startDiscoveryResponder({
+        port: cfg.discoveryPort,
+        host: cfg.host,
+        name: serverDisplayName(),
+        httpPort: () => {
+          const address = app.server.address();
+          return typeof address === "object" && address ? address.port : null;
+        },
+        log: app.log,
+      });
 
   // --- device websocket -----------------------------------------------------
   app.get(AGENT_WS_PATH, { websocket: true }, (socket: WebSocket, req) => {
@@ -362,8 +379,9 @@ export async function buildApp(cfg: AppConfig) {
 
   app.addHook("onClose", async () => {
     hub.stop();
+    await discovery?.close();
     db.close();
   });
 
-  return { app, db, hub };
+  return { app, db, hub, discovery };
 }

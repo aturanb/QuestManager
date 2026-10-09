@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadCafeQuestConfig, isPlaceholderAppId } from "./config.js";
 import { normKey } from "./auth.js";
 import { loadRootEnv, nonBlankEnv } from "./env.js";
+import { DISCOVERY_PORT } from "@cafequest/shared";
 
 const serverRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 loadRootEnv();
@@ -22,7 +23,7 @@ const { config, path: configPath, found } = loadCafeQuestConfig();
 const adminApiKey = normKey(process.env.ADMIN_API_KEY);
 
 const { app } = await buildApp({
-  dbPath, port, host, adminApiKey, games: config.games,
+  dbPath, port, host, adminApiKey, games: config.games, discoveryPort: DISCOVERY_PORT,
 });
 app.log.info({ configPath, found }, found ? "loaded cafequest.config.json" : "no cafequest.config.json; using built-in defaults");
 if (config.games.length > 0 && config.games.every((g) => isPlaceholderAppId(g.metaAppId))) {
