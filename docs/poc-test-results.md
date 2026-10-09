@@ -25,6 +25,10 @@ Date: 2026-10-08
 | Session tracking | NOT TESTED on hardware | Covered by the simulator e2e test only. |
 | Reboot recovery | NOT TESTED | No BOOT_COMPLETED receiver exists; the agent currently starts when CafeQuest is opened. |
 | Headset app in Turkish | NOT TESTED | EN/TR switch and SharedPreferences pick built and JVM unit-tested; this APK has not been installed on a Quest yet (morning-test row 15). |
+| Server discovery (fresh install) | NOT TESTED | UDP probe/reply built and tested on loopback (server and agent JVM tests); not yet run on a Quest or through the café access point (morning-test row 16). |
+| Find server button | NOT TESTED | Morning-test row 17. |
+| PC IP change healing | NOT TESTED | Agent searches before every retry after 3 failed connects; morning-test row 18. |
+| Manual IP stays pinned | NOT TESTED | Unit-tested rule (Manual never searches); morning-test row 19. |
 
 ## Bugs found during this hardware run
 

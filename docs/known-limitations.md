@@ -1,16 +1,17 @@
 # Known Limitations
 
-- **No per-device credentials yet**: one shared `DEVICE_ENROLLMENT_KEY` gates
-  enrollment; architecture permits per-device tokens later (§35).
+- **No agent authentication**: any device on the café LAN can connect to
+  `/agent-ws` as a headset. The shared enrollment key was removed on 2026-10-09
+  because CafeQuest only ever runs on the café's own network.
 - **No store-and-forward**: launching to an offline headset is rejected (409);
   the human must connect the headset first.
 - **Dashboard WS key in query string**: browsers cannot set WS headers; the key
   travels as `?key=`. Request logging is disabled server-side to compensate.
 - **Removing a headset is not a ban**: `DELETE /api/devices/:id` (the
   dashboard's "Remove headset" on an offline card) drops the device with its
-  sessions, commands and app inventory, but a headset that still has the agent
-  and the enrollment key enrolls again on its next hello. A connected headset
-  is refused with 409 `headset_online`.
+  sessions, commands and app inventory, but a headset that still runs the agent
+  comes back on its next hello. A connected headset is refused with 409
+  `headset_online`.
 - **Session countdown** is client-rendered from server time; a closed laptop
   lid pauses it until the next state push.
 - **Simulator battery** drains 1%/5s tick; not a real discharge model.
@@ -58,3 +59,12 @@
   (`META_APP_ID_NOT_CONFIGURED`) and Meta SDK messages are shown as sent, after
   a Turkish lead-in such as "Açılamadı: …". The language pick is per browser
   and per headset, not café-wide.
+- **Discovery needs one broadcast domain**: headsets find the server only on
+  the same subnet, through an access point that passes broadcasts, with inbound
+  UDP 3000 allowed on the PC and the server on `HOST=0.0.0.0` (a socket bound to
+  one address misses broadcasts). Otherwise use **Manual** with the PC's IP.
+  UNVERIFIED on hardware (docs/morning-test.md rows 16–19).
+- **A renamed or replaced café PC is not followed automatically**: an Auto
+  headset accepts only the PC name it remembers, so after a rename staff press
+  **Find server** once per headset. On a fresh install with two servers
+  answering (say, a laptop running `npm run dev`), the first answer wins.

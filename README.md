@@ -8,7 +8,7 @@ and remote game launching — from a web dashboard on the café PC.
 
 ```bash
 npm install
-cp .env.example .env # then replace both change-me keys
+cp .env.example .env # then replace the change-me admin key
 npm run catalog:update # cache the community package/App-ID catalog locally
 npm run dev          # starts server (port 3000) + dashboard (port 5173)
 npm run simulator -- --count 8   # separate terminal: 8 simulated headsets
@@ -35,20 +35,17 @@ Open [cafequest.config.example.json](cafequest.config.example.json), copy it to
 `cafequest.config.json`, and replace every `FILL_*` game Meta App ID. These IDs
 identify the target games passed to Meta's `launchOtherApp` API.
 
-A freshly installed headset needs no typing. The APK bakes its setup defaults in
-at build time:
+A freshly installed headset needs no typing. It finds the café PC on the Wi-Fi
+by itself and follows it when the PC's IP changes ([server
+discovery](docs/architecture.md#server-discovery)); the PC firewall must allow
+inbound TCP 3000 and UDP 3000. The only value baked into the APK is CafeQuest's
+own Meta App ID, the top-level `metaAppId` in `cafequest.config.json`: change
+it, rebuild, and every newly installed headset picks it up.
 
-| Setup field | Baked from |
-|---|---|
-| Server host | `CAFE_PC_LAN_HOST` in `.env` |
-| Server port | `PORT` in `.env` |
-| Enrollment key | `DEVICE_ENROLLMENT_KEY` in `.env` |
-| Meta App ID | top-level `metaAppId` in `cafequest.config.json` |
-
-Change those files, rebuild, and every newly installed headset picks the values
-up. Only the device name is worth setting per headset, and the dashboard can
-rename a headset instead. On the setup screen, a field left blank keeps the
-value already stored, so editing one field never clears the others.
+For debugging, the setup screen's **Manual** mode dials a typed host and port
+and never searches. Only the device name is worth setting per headset, and the
+dashboard can rename a headset instead. On the setup screen, a field left blank
+keeps the value already stored, so editing one field never clears the others.
 
 The headset's Meta App ID initializes the Meta SDK and is different from the
 per-game target IDs.
@@ -82,7 +79,7 @@ to clear stale headsets off the board.
 - [docs/decisions.md](docs/decisions.md) — implementation decisions log
 - [docs/meta-research.md](docs/meta-research.md) — verified current Meta launch API research
 - [docs/morning-test.md](docs/morning-test.md) — the 10-minute physical test plan
-- [docs/architecture.md](docs/architecture.md) — components, semantics, auth model
+- [docs/architecture.md](docs/architecture.md) — components, semantics, server discovery, auth model
 - [docs/quest-setup.md](docs/quest-setup.md) — per-headset install + config
 - [docs/poc-test-results.md](docs/poc-test-results.md) — hardware results sheet (all NOT TESTED)
 - [docs/known-limitations.md](docs/known-limitations.md) — what this POC does not do

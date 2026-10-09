@@ -159,3 +159,33 @@ must survive Stop. SQLite cannot drop `NOT NULL` from `ends_at` without
 rebuilding the table, and POC migrations are additive, so the flag is a new
 column instead. Covered by `server/tests/store.test.ts` and
 `server/tests/sessions.test.ts`.
+
+## Headsets find the server by UDP probe
+
+Decision: in **Auto** mode the agent broadcasts `{"type":"cafequest_discover"}`
+to UDP 3000 and the server answers the sender with its name and live HTTP port
+(`server/src/discovery.ts`, `quest-agent/.../Discovery.kt`). The agent searches
+when no address is saved and before every retry after 3 failed connects, and
+then accepts only the remembered PC name. **Manual** mode keeps a typed address
+and never searches. `CAFE_PC_LAN_HOST` and the baked `PORT` are gone; this
+supersedes the host/port part of "Agent setup defaults are baked in at build
+time" (the Meta App ID is still baked).
+
+Reason: the café PC's IP comes from the router. A baked or typed address went
+stale whenever it changed, and fixing it meant retyping it on eight headsets.
+mDNS needed an npm dependency and Android's callback-heavy `NsdManager`, and
+multicast is filtered by more access points than broadcast; a subnet sweep
+assumed /24 and port 3000. The reply's source address is the IP that works even
+when the PC has several interfaces. Spec:
+`docs/superpowers/specs/2026-10-09-server-discovery-design.md`.
+
+## No enrollment key
+
+Decision: `DEVICE_ENROLLMENT_KEY`, `hello.enrollmentKey`, `ENROLLMENT_REJECTED`
+and the setup screen's key field are removed. The server's hello schema strips
+unknown keys, so a 0.2.0 agent that still sends one is accepted. `ADMIN_API_KEY`
+stays.
+
+Reason: CafeQuest runs only on the café's own LAN and is never published, so the
+key protected nothing real while costing a setup field and a way for a headset
+to fail enrollment.

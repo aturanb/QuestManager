@@ -21,7 +21,7 @@ npx tsc -p tsconfig.json     # whole-repo typecheck, noEmit (excludes dashboard)
 
 npm run dev                  # server :3000 + dashboard :5173
 npm run server / npm run dashboard
-npm run simulator -- --count 8 --stable --enrollment-key "$DEVICE_ENROLLMENT_KEY"
+npm run simulator -- --count 8 --stable
 npm run catalog:update       # builds, then refreshes gitignored server/data/app-catalog.json
 ```
 
@@ -30,6 +30,7 @@ Single tests (backend tests are compiled first, then run from `dist/`):
 ```bash
 npm run build -w shared && npm run build -w server
 node --test server/dist/tests/security.test.js
+node --test server/dist/tests/discovery.test.js
 node --test --test-name-pattern "reconnect with a stale last_seen_at" server/dist/tests/ownership.test.js
 node --test shared/dist/tests/protocol.test.js
 npm run build -w quest-simulator && node --test quest-simulator/dist/quest-simulator/tests/e2e.test.js
@@ -59,7 +60,9 @@ cd quest-agent && ./gradlew testDebugUnitTest     # JVM unit tests
 - The server loads the repo-root `.env` itself (`env.ts` walks up from
   `server/dist/src`). Shell exports take precedence; blank values count as unset.
 - Tests build apps with `dbPath: ":memory:"` and `port: 0`; `buildApp()` returns
-  `{ app, db, hub }` and `app.close()` stops the hub timers and closes the DB.
+  `{ app, db, hub, discovery }` (`discovery` is null unless `discoveryPort` is
+  set; tests that want it pass `0`) and `app.close()` stops the hub timers, the
+  discovery socket and the DB.
 
 ## Architecture
 
@@ -68,19 +71,22 @@ dashboard :5173 (React+Vite)
   │ REST /api/* (Authorization: Bearer ADMIN_API_KEY)  +  WS /dashboard-ws?key=
   ▼
 server :3000 — Fastify + better-sqlite3
-  app.ts    routes, auth hooks, the hello/enrollment handshake
+  app.ts    routes, auth hooks, the hello handshake
   hub.ts    live sockets, command lifecycle, 1s sweep, 1s dashboard state push
-  catalog-refresh.ts  the one network fetch, shared by CLI and refresh route
+  discovery.ts  UDP 3000 responder: answers headset probes with name + HTTP port
+  catalog-refresh.ts  the one internet fetch, shared by CLI and refresh route
   store.ts  ALL SQL (devices, games, device_apps, sessions, commands)
   db.ts     schema creation + additive idempotent migrations on open
-  │ WS /agent-ws (hello carries enrollmentKey — never a URL param)
+  │ UDP 3000: headset broadcasts a probe, server answers the sender
+  │ WS /agent-ws (hello, telemetry, commands; no key)
   ▼
-agents: quest-simulator (tests/demo) │ quest-agent APK (hardware)
+agents: quest-simulator (tests/demo, --url) │ quest-agent APK (hardware, finds the server)
 ```
 
-Two code paths reach the network, both via `catalog-refresh.ts`:
+Two code paths reach the internet, both via `catalog-refresh.ts`:
 `npm run catalog:update` and `POST /api/catalog/refresh` (the dashboard's
-**Update app list** button). Nothing else does. `appCatalog` in `app.ts` is a
+**Update app list** button). Nothing else does (the discovery responder only
+answers LAN probes). `appCatalog` in `app.ts` is a
 mutable binding and `Hub` holds a `() => AppCatalog` getter, so a refresh takes
 effect without a restart — don't turn either back into a captured value.
 
@@ -101,6 +107,10 @@ offline devices; the code sweeps every 1s and rejects offline launches with 409)
    (not generated from the server).
 
 Changing a message shape means touching all three plus their tests.
+
+Discovery is a separate, smaller pair: `shared/src/discovery.ts` (UDP 3000,
+≤512-byte JSON `cafequest_discover` probe and `cafequest_server` reply) and
+`quest-agent/.../Discovery.kt`. Change both together, with their tests.
 
 ### Invariants to preserve
 
@@ -135,14 +145,21 @@ Changing a message shape means touching all three plus their tests.
   and a stopped unlimited session stays in the snapshot until the next one.
 - **DB beats config**: `seedConfiguredGames` inserts missing games and upgrades a
   placeholder `metaAppId` to a real one, but never overwrites values staff set.
+- **Discovery**: the server answers only valid probes of ≤512 bytes, with its
+  live HTTP port, and never announces itself. An Auto headset searches when
+  nothing is saved and before every retry after 3 failed connects, then accepts
+  only the PC name it remembers; Manual never searches, and a search result
+  never overwrites a Manual setup (`withDiscovered`). `HOST` must stay
+  `0.0.0.0`; a busy UDP 3000 disables discovery with a warning, never the server.
 
 ### Auth (LAN POC model)
 
 `ADMIN_API_KEY` guards all `/api/*` except `/api/health`, and `/dashboard-ws` via
-`?key=` (browsers cannot set WS headers). `DEVICE_ENROLLMENT_KEY` gates agent
-hello. Either key unset = open mode with a boot warning — tested behavior, not an
-oversight. Fastify runs with `disableRequestLogging: true` so WS key params never
-reach the logs; do not re-enable request logging.
+`?key=` (browsers cannot set WS headers). Unset = open mode with a boot warning —
+tested behavior, not an oversight. Agents need no key: the enrollment key was
+removed on 2026-10-09 (LAN-only café), and the hello schema strips a leftover
+`enrollmentKey` sent by an old APK. Fastify runs with `disableRequestLogging:
+true` so WS key params never reach the logs; do not re-enable request logging.
 
 ### Installed apps and Meta App IDs
 
@@ -158,13 +175,13 @@ mappings. A manual dashboard correction is stored as a `games` row carrying
 from the catalog; CafeQuest's own Dashboard App ID (`1336716629531597`) comes
 from the human via `cafequest.config.json`.
 
-The agent's setup screen is prefilled from `BuildConfig` fields that
-`quest-agent/app/build.gradle.kts` reads at build time out of the repo-root
-`.env` (`CAFE_PC_LAN_HOST`, `PORT`, `DEVICE_ENROLLMENT_KEY`) and
-`cafequest.config.json` (`metaAppId`). `SetupValues.kt` holds the pure merge
-rules: a blank field keeps the stored value, so saving one field never wipes
-another. Usage access needs `adb shell appops set com.cafequest.agent
-GET_USAGE_STATS allow` once per headset.
+Only CafeQuest's own Meta App ID is baked into `BuildConfig`, from
+`cafequest.config.json` (`metaAppId`); the APK no longer reads `.env`. The
+server address comes from discovery in **Auto** mode (`Discovery.kt`,
+`ServerLocator.kt`) or is typed in **Manual** mode. `SetupValues.kt` holds the
+pure merge rules: a blank field keeps the stored value, so saving one field
+never wipes another. Usage access needs `adb shell appops set
+com.cafequest.agent GET_USAGE_STATS allow` once per headset.
 
 ## Conventions
 
