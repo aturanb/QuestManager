@@ -179,7 +179,26 @@ class AndroidRtcPeerFactory(private val context: Context) : RtcPeerFactory {
     ): RtcPeer {
         val projection = grant as? AndroidProjectionGrant
             ?: throw IllegalArgumentException("casting requires a Quest MediaProjection grant")
-        return AndroidRtcPeer(context, projection, onLocalSignal, onState)
+        WebRtcRuntime.initialize(context)
+        return AndroidRtcPeer(context.applicationContext, projection, onLocalSignal, onState)
+    }
+}
+
+/** Loads libWebRTC exactly once in this process, before any native factory is built. */
+private object WebRtcRuntime {
+    @Volatile private var initialized = false
+
+    fun initialize(context: Context) {
+        if (initialized) return
+        synchronized(this) {
+            if (initialized) return
+            PeerConnectionFactory.initialize(
+                PeerConnectionFactory.InitializationOptions
+                    .builder(context.applicationContext)
+                    .createInitializationOptions()
+            )
+            initialized = true
+        }
     }
 }
 

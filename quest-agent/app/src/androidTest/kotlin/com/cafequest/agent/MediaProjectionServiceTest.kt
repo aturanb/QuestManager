@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,5 +43,26 @@ class MediaProjectionServiceTest {
         assertTrue(declared.contains("android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"))
         assertTrue(declared.contains("android.permission.FOREGROUND_SERVICE_DATA_SYNC"))
         assertFalse("the support view is video-only", declared.contains("android.permission.RECORD_AUDIO"))
+    }
+
+    @Test
+    fun declaresBackgroundWindowPermissionForAutomaticConsent() {
+        val declared = context.packageManager
+            .getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+            .requestedPermissions
+            .orEmpty()
+            .toSet()
+
+        assertTrue(declared.contains("android.permission.SYSTEM_ALERT_WINDOW"))
+    }
+
+    @Test
+    fun automaticConsentActivityUsesAnIsolatedTaskThatCanRevealTheCustomerApp() {
+        val info = context.packageManager.getActivityInfo(
+            ComponentName(context.packageName, "com.cafequest.agent.CastConsentActivity"),
+            PackageManager.GET_META_DATA,
+        )
+
+        assertNull(info.taskAffinity)
     }
 }

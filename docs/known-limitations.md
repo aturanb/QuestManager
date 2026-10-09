@@ -93,6 +93,19 @@
   request needs a fresh tap on Quest's own `MediaProjection` dialog. A headset
   that nobody is wearing cannot be watched without someone approving on it, and
   CafeQuest never fakes or remembers an approval.
+- **The automatic consent prompt needs a one-time app-op and a worn headset**:
+  the agent opens Quest's selector over the running game only if
+  `adb shell appops set com.cafequest.agent SYSTEM_ALERT_WINDOW allow` was run
+  (it survives `adb install -r`); otherwise the diagnostics-screen button is the
+  fallback. On an unworn headset sitting behind a Guardian dialog, Horizon OS's
+  volumetric window manager logged `Placement request in-flight` and timed out
+  10 s per attempt, so a new consent task never opened — only a headset on a
+  person's face has been seen to place it quickly. Taking an unanswered prompt
+  down again (admin stop, approval timeout) uses a `CLEAR_TOP` re-entry and is
+  UNVERIFIED_HARDWARE. If the agent is killed or reinstalled while a selector
+  is up, nothing remembers it and the selector stays orphaned in its task; clear
+  it with `adb shell dumpsys activity activities` (find the `rootTaskId` of the
+  `CastConsentActivity` task) and `adb shell am stack remove <rootTaskId>`.
 - **Some apps opt out of capture**: any game or app that sets
   `FLAG_SECURE`/`setSecure` renders black in the support view. CafeQuest asks
   the platform for the screen, so whether a given title is watchable is the

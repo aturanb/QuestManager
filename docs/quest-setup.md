@@ -44,6 +44,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 # to the PACKAGE_USAGE_STATS manifest permission. Once per headset; it survives
 # `adb install -r` but not an uninstall.
 adb shell appops set com.cafequest.agent GET_USAGE_STATS allow
+# Lets an admin live-view request bring up Quest's system screen-sharing prompt
+# while a game is open. Once per headset; it survives `adb install -r`.
+adb shell appops set com.cafequest.agent SYSTEM_ALERT_WINDOW allow
 ```
 
 Without that grant every card reads **Usage access required** instead of the

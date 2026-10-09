@@ -42,6 +42,10 @@ class AgentService : Service() {
             publisherFactory = WebRtcPublisherFactory(AndroidRtcPeerFactory(this), CastVideoProfile.SUPPORT),
             store = AgentRuntime.casting,
         )
+        val consentPrompts = CastConsentPromptGate(
+            prompt = { sessionId -> startConsentActivity(CastConsentActivity.intent(this, sessionId)) },
+            dismiss = { startConsentActivity(CastConsentActivity.dismissIntent(this)) },
+        )
         connections = AgentConnectionSupervisor {
             val identity = IdentityStore(this@AgentService).load()
             val launcher: AppLauncher = MetaAppLauncher(this@AgentService, identity.metaAppId)
@@ -58,6 +62,7 @@ class AgentService : Service() {
         // The foreground type follows the session: mediaProjection only while one is live.
         scope.launch {
             AgentRuntime.casting.state.collect { state ->
+                consentPrompts.onState(state)
                 if (projectionForeground && state.phase != CastingPhase.NEGOTIATING && state.phase != CastingPhase.LIVE) {
                     setProjectionForeground(false)
                 }
@@ -133,6 +138,16 @@ class AgentService : Service() {
         )
         val deny = action as? CastServiceAction.Deny ?: return
         casting.deny(deny.sessionId)
+    }
+
+    private fun startConsentActivity(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (error: Exception) {
+            // The diagnostics-screen button remains available when a headset
+            // has not received the one-time background-window app-op.
+            Log.w(LOG_TAG, "automatic cast consent prompt failed: ${error.javaClass.simpleName}")
+        }
     }
 
     private fun stopByUser(intent: Intent) {

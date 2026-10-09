@@ -45,7 +45,7 @@ What they prove without hardware:
   shutdown and both timeouts);
 - a binary/media frame is rejected and relayed nowhere, no SDP/ICE/admin key
   reaches the logs, and a live session writes nothing to SQLite;
-- the browser client's state machine, retry/stop wiring and the modal's
+- the browser client's state machine, retry/stop wiring and the floating viewer's
   a11y-labeled states;
 - the headset side: one pending request, one-use consent, idempotent teardown,
   stale activity results ignored, bitrate/FPS profile values, and both languages.
@@ -84,20 +84,25 @@ with a battery reading.
 cd quest-agent && JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell appops set com.cafequest.agent GET_USAGE_STATS allow   # unchanged, for Open now
+adb shell appops set com.cafequest.agent SYSTEM_ALERT_WINDOW allow # once, for automatic consent prompt
 adb shell am start -n com.cafequest.agent/.MainActivity          # also starts the agent service
 ```
 
 Put a managed game in the foreground, then:
 
 1. Dashboard: press **Request live view** on the card.
-2. Headset: CafeQuest's diagnostics panel shows **Live support view** with the
-   request explanation and **Share screen with café staff**.
+2. Headset: Quest's own screen-sharing selector opens over the game by itself
+   (CafeQuest's transparent consent activity, allowed to start from the
+   background by the `SYSTEM_ALERT_WINDOW` app-op). Without the app-op, or if the
+   launch is refused, CafeQuest's diagnostics panel shows **Live support view**
+   with **Share screen with café staff** as the fallback.
    → this is morning-test row 20.
-3. Headset: tap **Share screen with café staff**. Quest's own system dialog
-   ("start recording or casting") appears — not a CafeQuest dialog.
-   → row 21. Developer Mode does not replace this dialog, and a second session
-   always asks again → row 33.
-4. Approve and start a stopwatch: the dashboard modal should show the picture
+3. Headset: choose the screen and press **Share** in Quest's own dialog (not a
+   CafeQuest dialog). The temporary activity closes and the game comes back to
+   the front → row 21 and row 23. Developer Mode does not replace this dialog,
+   and a second session always asks again → row 33. Cancel once as well: the
+   game must come back and the dashboard must show the refusal.
+4. Approve and start a stopwatch: the dashboard viewer should show the picture
    within 15 s → row 22. Return to the game and confirm the game is visible
    (row 23); note whether the picture is readable and correctly oriented (row 24).
 5. Latency: point the headset at a clock/stopwatch and photograph both screens,
@@ -107,15 +112,21 @@ Put a managed game in the foreground, then:
 7. Record battery % before/after and whether the headset got warm or the game
    stuttered → row 27.
 8. Stop paths: dashboard **Stop live view** (row 28) and headset **Stop sharing**
-   (row 29). Each must end the session within ~3 s, clear the modal, and leave the
+   (row 29). Each must end the session within ~3 s, close the viewer, and leave the
    headset panel back on the ordinary diagnostics view.
-9. Refuse consent once (row 30) and let one request time out by tapping nothing
+9. Unanswered prompt: request a live view, touch nothing, then press **Stop
+   live view** on the dashboard (and, separately, let the 90 s approval window
+   expire). The selector must disappear by itself and the game must be in front
+   again; the agent re-enters its consent activity with `CLEAR_TOP` to remove it.
+   UNVERIFIED_HARDWARE: this was only exercised against a headset nobody was
+   wearing (see docs/known-limitations.md).
+10. Refuse consent once (row 30) and let one request time out by tapping nothing
    for a minute (row 31): the dashboard must show the failure instead of a stuck
    spinner, and the next request asks for consent again.
-10. Repeat 2–5 with two more apps, including a 2D panel app (row 32). A black
+11. Repeat 2–5 with two more apps, including a 2D panel app (row 32). A black
     frame means that title sets `FLAG_SECURE`; nothing can be changed from the
     CafeQuest side, so record it as-is.
-11. Isolation checks: with a session Live, a second card's **Request live view**
+12. Isolation checks: with a session Live, a second card's **Request live view**
     is refused (`busy`) → row 34; sleeping the headset (35), dropping its Wi-Fi
     (36), reloading the dashboard (37), restarting the agent so a duplicate hello
     replaces the socket (38), and force-stopping/reopening CafeQuest (39) must
