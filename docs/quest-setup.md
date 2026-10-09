@@ -9,6 +9,30 @@ only value baked into the APK is CafeQuest's Meta App ID, read at build time fro
 headset at once. Blank fields on the setup screen keep the value already stored,
 so editing one field never clears the others.
 
+## The café PC
+
+Headsets remember the server by its name (the PC's hostname, shown on the
+diagnostics screen), so give the PC a name that never changes **before** any
+headset connects to it:
+
+- **Windows** (the café PC): Settings → System → About → **Rename this PC**, e.g.
+  `CAFE-PC`, then restart. Windows keeps that name across networks and reboots.
+- **Mac** (testing): `sudo scutil --set HostName <name>` once. Without it macOS
+  takes its name from the router, and that name can change along with the IP.
+
+The PC firewall must allow inbound TCP 3000 (dashboard and headsets) and UDP 3000
+(discovery). On Windows, the first `npm run dev` asks whether to let Node.js
+through: allow it, and set the café network to **Private** (Settings → Network &
+internet → your Wi-Fi or Ethernet → Network profile type). The prompt only
+allows Private networks by default, so on a Public network both ports stay
+blocked. If someone clicked Cancel, tick Node.js under "Allow an app through
+Windows Firewall". A hand-made TCP-only port rule does not cover discovery. Keep
+`HOST=0.0.0.0` in `.env` (the default).
+
+**Moving the server to another PC** (say, from the test Mac to the café's Windows
+PC): Auto headsets keep looking for the old name. On each headset press **Change
+setup** → **Find server** → pick the new PC → **Save and connect**, once.
+
 ## Install
 
 ```bash
@@ -42,10 +66,6 @@ server line like `CAFE-PC · 192.168.1.50:3000 · Auto`, and the dashboard card 
 this headset should flip to Online within ~5s. Saving while the agent service is
 already running reloads the server and Meta App ID immediately; no process
 restart is required.
-
-The PC firewall must allow inbound TCP 3000 (dashboard and headsets) and UDP 3000
-(discovery). Windows' "allow node" prompt creates a program rule that covers
-both; a hand-made TCP-only port rule does not.
 
 The headset's **Meta App ID** initializes CafeQuest with the Meta SDK. It is not
 one of the target-game IDs in `cafequest.config.json`; each game still needs its

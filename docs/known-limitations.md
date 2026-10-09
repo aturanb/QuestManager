@@ -68,3 +68,9 @@
   headset accepts only the PC name it remembers, so after a rename staff press
   **Find server** once per headset. On a fresh install with two servers
   answering (say, a laptop running `npm run dev`), the first answer wins.
+- **The server's name is the PC's hostname**: a Mac without a fixed `HostName`
+  takes its name from the router, and that name can change along with the IP,
+  after which Auto headsets stop accepting the server. Fix a Mac's name once
+  with `sudo scutil --set HostName <name>` (done on the test Mac:
+  `turans-mac`). Windows keeps its computer name, so the café PC is affected
+  only if someone renames it.

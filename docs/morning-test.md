@@ -11,7 +11,10 @@ npm run dev        # server :3000 + dashboard :5173
 
 The server loads the root `.env` automatically; the dashboard prompts for
 `ADMIN_API_KEY`. Headsets need no key and find the PC on the Wi-Fi by
-themselves; the PC firewall must allow inbound TCP 3000 and UDP 3000.
+themselves; the PC firewall must allow inbound TCP 3000 and UDP 3000. Give the
+PC a fixed name first (docs/quest-setup.md, "The café PC"): headsets remember
+the server by name, and a Mac otherwise takes a name from the router that can
+change.
 
 For Manual mode only: the PC's LAN IP (`ipconfig` / `ifconfig`), e.g.
 `192.168.1.50`. Dashboard: http://localhost:5173.
