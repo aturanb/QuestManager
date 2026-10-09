@@ -1,7 +1,14 @@
 package com.cafequest.agent
 
+import android.content.Context
+import android.net.ConnectivityManager
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.SocketTimeoutException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
@@ -58,4 +65,68 @@ fun broadcastTargets(subnets: List<Pair<Inet4Address, Int>>): List<InetAddress> 
         targets += InetAddress.getByAddress(ByteArray(4) { i -> (broadcast ushr (24 - 8 * i)).toByte() })
     }
     return targets.toList()
+}
+
+/**
+ * Broadcasts the probe and collects answers (spec §3): [probes] sends, [gapMs]
+ * apart, to every target, listening until [windowMs] after the first. Answers
+ * are deduped by address and port and kept in arrival order. Never throws: no
+ * Wi-Fi or no route reads as "nothing found". No android.* calls, so it runs in
+ * JVM tests against a loopback responder.
+ */
+class ServerDiscovery(
+    private val targets: () -> List<InetAddress>,
+    private val port: Int = DISCOVERY_PORT,
+    private val windowMs: Long = 1_500,
+    private val probes: Int = 3,
+    private val gapMs: Long = 400,
+) {
+    suspend fun search(): List<FoundServer> = withContext(Dispatchers.IO) {
+        val found = LinkedHashMap<String, FoundServer>()
+        runCatching { collect(found) }
+        found.values.toList()
+    }
+
+    private fun collect(found: MutableMap<String, FoundServer>) {
+        val destinations = targets()
+        val probe = encodeDiscoveryProbe()
+        DatagramSocket().use { socket ->
+            socket.broadcast = true
+            val buffer = ByteArray(MAX_DISCOVERY_BYTES)
+            val start = System.currentTimeMillis()
+            val deadline = start + windowMs
+            var sent = 0
+            while (true) {
+                val now = System.currentTimeMillis()
+                if (sent < probes && now >= start + sent * gapMs) {
+                    for (target in destinations) {
+                        // One unreachable target (say, no route for 255.255.255.255) must not stop the others.
+                        runCatching { socket.send(DatagramPacket(probe, probe.size, target, port)) }
+                    }
+                    sent++
+                    continue
+                }
+                if (now >= deadline) break
+                val wakeAt = if (sent < probes) minOf(start + sent * gapMs, deadline) else deadline
+                socket.soTimeout = (wakeAt - now).coerceAtLeast(1).toInt()
+                val packet = DatagramPacket(buffer, buffer.size)
+                try {
+                    socket.receive(packet)
+                } catch (_: SocketTimeoutException) {
+                    continue
+                }
+                val host = packet.address?.hostAddress ?: continue
+                val text = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
+                val server = parseDiscoveryReply(text, host) ?: continue
+                found.putIfAbsent("${server.host}:${server.port}", server)
+            }
+        }
+    }
+}
+
+/** Broadcast targets for the network the headset is on now: all-ones plus its subnet broadcast. */
+fun wifiBroadcastTargets(context: Context): List<InetAddress> {
+    val connectivity = context.getSystemService(ConnectivityManager::class.java)
+    val links = connectivity?.getLinkProperties(connectivity.activeNetwork)?.linkAddresses.orEmpty()
+    return broadcastTargets(links.mapNotNull { link -> (link.address as? Inet4Address)?.let { it to link.prefixLength } })
 }
