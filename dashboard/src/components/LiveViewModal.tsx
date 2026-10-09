@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { CastViewState } from "../casting";
 import { castErrorText } from "../errors";
 import { useI18n } from "../i18n";
@@ -22,6 +22,8 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [noPicture, setNoPicture] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const contentId = useId();
 
   useEffect(() => {
     const video = videoRef.current;
@@ -84,44 +86,59 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
             : castErrorText(state.error, t);
 
   return (
-    <div className="cast-backdrop">
-      <section className="cast-modal" role="dialog" aria-modal="true" aria-label={t.cast.modalTitle(deviceName)}>
+      <aside className="cast-panel" aria-label={t.cast.modalTitle(deviceName)} data-minimized={minimized}>
         <header className="cast-head">
+          <div className="cast-title">
           <h2>{t.cast.modalTitle(deviceName)}</h2>
           <p className="cast-phase" role="status" aria-live="polite" data-phase={state.phase}>
             {phaseWord}
           </p>
+          </div>
+          <div className="cast-head-actions">
+            <button
+              className="btn"
+              aria-controls={contentId}
+              aria-expanded={!minimized}
+              aria-label={minimized ? t.cast.expandLabel(deviceName) : t.cast.minimizeLabel(deviceName)}
+              onClick={() => setMinimized((current) => !current)}
+            >
+              {minimized ? t.cast.expand : t.cast.minimize}
+            </button>
+            <button className="btn" aria-label={t.cast.closeLabel(deviceName)} onClick={onClose}>
+              {t.cast.close}
+            </button>
+          </div>
         </header>
-        <p className="cast-body">{body}</p>
+        {!minimized && (
+          <div className="cast-content" id={contentId}>
+            <p className="cast-body">{body}</p>
 
-        {state.phase === "live" && (
-          <div className="cast-video">
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption -- live video has no audio track */}
-            <video ref={videoRef} autoPlay muted playsInline aria-label={t.cast.videoLabel(deviceName)} />
-            {noPicture && (
-              <p className="note" data-tone="wait" role="status">
-                {t.cast.noPicture}
-              </p>
+            {state.phase === "live" && (
+              <div className="cast-video">
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption -- live video has no audio track */}
+                <video ref={videoRef} autoPlay muted playsInline aria-label={t.cast.videoLabel(deviceName)} />
+                {noPicture && (
+                  <p className="note" data-tone="wait" role="status">
+                    {t.cast.noPicture}
+                  </p>
+                )}
+              </div>
             )}
+
+            <div className="controls cast-controls">
+              {state.phase === "live" && (
+                <button className="btn btn-stop" onClick={onStop}>
+                  {t.cast.stop}
+                </button>
+              )}
+              {state.phase === "failed" && (
+                <button className="btn btn-primary" aria-label={t.cast.retryLabel(deviceName)} onClick={onRetry}>
+                  {t.cast.retry}
+                </button>
+              )}
+            </div>
           </div>
         )}
-
-        <div className="controls cast-controls">
-          {state.phase === "live" && (
-            <button className="btn btn-stop" onClick={onStop}>
-              {t.cast.stop}
-            </button>
-          )}
-          {state.phase === "failed" && (
-            <button className="btn btn-primary" aria-label={t.cast.retryLabel(deviceName)} onClick={onRetry}>
-              {t.cast.retry}
-            </button>
-          )}
-          <button className="btn" aria-label={t.cast.closeLabel(deviceName)} onClick={onClose}>
-            {t.cast.close}
-          </button>
-        </div>
-      </section>
-    </div>
+      </aside>
   );
 }

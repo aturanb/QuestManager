@@ -26,20 +26,33 @@ function props(over: Partial<LiveViewModalProps> = {}): LiveViewModalProps {
 }
 
 describe("LiveViewModal", () => {
-  it("is an accessible modal that starts in the connecting state", () => {
+  it("is a non-modal live region that leaves the dashboard available", () => {
     render(<LiveViewModal {...props()} />, { wrapper: LangProvider });
-    const dialog = screen.getByRole("dialog", { name: "Live view of Quest 01" });
-    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const panel = screen.getByRole("complementary", { name: "Live view of Quest 01" });
+    expect(panel).not.toHaveAttribute("aria-modal");
+    expect(screen.queryByRole("dialog", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Connecting…");
     expect(screen.getByText("Reserving the live view and reaching the headset.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Stop live view/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close the live view of Quest 01" })).toHaveTextContent("Close");
   });
 
+  it("minimizes the picture without ending the live session and expands it again", () => {
+    const stream = { id: "remote-stream" } as unknown as MediaStream;
+    render(<LiveViewModal {...props({ state: { phase: "live" }, stream })} />, { wrapper: LangProvider });
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize the live view of Quest 01" }));
+    expect(screen.queryByLabelText("Live screen of Quest 01")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Live");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand the live view of Quest 01" }));
+    expect(screen.getByLabelText("Live screen of Quest 01")).toBeInTheDocument();
+  });
+
   it("asks staff to have the customer approve on the headset", () => {
     render(<LiveViewModal {...props({ state: { phase: "awaiting_approval" } })} />, { wrapper: LangProvider });
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for approval on the headset");
-    expect(screen.getByText("Ask the customer to open CafeQuest and approve screen sharing.")).toBeInTheDocument();
+    expect(screen.getByText("The sharing prompt opened on the headset. Ask the customer to approve it.")).toBeInTheDocument();
   });
 
   it("shows the negotiating phase while WebRTC starts", () => {
@@ -112,9 +125,9 @@ describe("LiveViewModal", () => {
         {...props({ deviceName: "Quest 02", state: { phase: "awaiting_approval" } })}
       />
     );
-    expect(screen.getByRole("dialog", { name: "Quest 02 canlı görüntüsü" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Quest 02 canlı görüntüsü" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Gözlükte onay bekleniyor");
-    expect(screen.getByText("Müşteriden CafeQuest'i açıp ekran paylaşımını onaylamasını isteyin.")).toBeInTheDocument();
+    expect(screen.getByText("Paylaşım penceresi gözlükte açıldı. Müşteriden onaylamasını isteyin.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Quest 02 canlı görüntüsünü kapat" })).toHaveTextContent("Kapat");
   });
 

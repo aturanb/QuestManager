@@ -484,14 +484,14 @@ describe("App", () => {
     expect(within(card).getByRole("button", { name: "Beat Saber oyununu seçili 1 gözlükte aç" })).toBeInTheDocument();
   });
 
-  it("opens the live-view modal before the reservation returns and starts one client", async () => {
+  it("opens the live-view panel before the reservation returns and starts one client", async () => {
     const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
     const cast = fakeCastFactory();
     render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
 
     fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
-    const dialog = screen.getByRole("dialog", { name: "Live view of Quest 01" });
-    expect(within(dialog).getByText("Connecting…")).toBeInTheDocument();
+    const panel = screen.getByRole("complementary", { name: "Live view of Quest 01" });
+    expect(within(panel).getByText("Connecting…")).toBeInTheDocument();
     expect(board.castCalls()).toHaveLength(1);
 
     await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
@@ -543,7 +543,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
     fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
-    expect(screen.queryByRole("dialog", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
 
     await act(async () => board.resolveCast({ sessionId: "s9", status: "reserved" }));
     await waitFor(() => {
@@ -580,7 +580,7 @@ describe("App", () => {
     act(() => cast.last().options.callbacks.onUnauthorized());
 
     expect(await screen.findByRole("dialog", { name: "Enter the admin key" })).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
   });
 
   it("unmount stops an active cast exactly once", async () => {
