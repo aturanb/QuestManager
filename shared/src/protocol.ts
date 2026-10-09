@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 1;
+export const LAUNCH_ANDROID_PACKAGE_CAPABILITY = "launch_android_package" as const;
+export const AgentCapabilitySchema = z.enum([LAUNCH_ANDROID_PACKAGE_CAPABILITY]);
 
 /** A game CafeQuest requested to launch; distinct from "the true foreground game". */
 export const ExpectedGameSchema = z.object({
@@ -16,6 +18,9 @@ export const HelloSchema = z.object({
   deviceName: z.string().min(1).max(64),
   deviceModel: z.string().min(1).max(64),
   agentVersion: z.string().min(1).max(32),
+  // Optional keeps protocol v1 hellos from older agents valid. The server must
+  // only send additive command shapes when the connected agent advertises one.
+  capabilities: z.array(AgentCapabilitySchema).max(16).optional(),
 });
 
 export const BatterySchema = z.object({
@@ -154,6 +159,7 @@ export const ServerErrorSchema = z.object({
 });
 
 export type Hello = z.infer<typeof HelloSchema>;
+export type AgentCapability = z.infer<typeof AgentCapabilitySchema>;
 export type Telemetry = z.infer<typeof TelemetrySchema>;
 export type InstalledApp = z.infer<typeof InstalledAppSchema>;
 export type InstalledApps = z.infer<typeof InstalledAppsSchema>;

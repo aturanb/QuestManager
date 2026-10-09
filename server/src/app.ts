@@ -133,7 +133,7 @@ export async function buildApp(cfg: AppConfig) {
         // device keeps its old last_seen_at and the offline sweep drops the
         // new socket before the first telemetry arrives.
         touchDevice(db, device.id, {});
-        hub.addAgentSocket(device.id, socket);
+        hub.addAgentSocket(device.id, socket, hello.data.capabilities ?? []);
         return;
       }
       hub.handleAgentMessage(deviceId, socket, text);
@@ -255,6 +255,12 @@ export async function buildApp(cfg: AppConfig) {
     const resolved = resolveInstalledApp(db, appCatalog, installed);
     if (!hub.isDeviceConnected(deviceId)) {
       return reply.code(409).send({ error: "headset offline", detail: "device not connected" });
+    }
+    if (!resolved.metaAppId && !hub.supportsPackageLaunch(deviceId)) {
+      return reply.code(409).send({
+        error: "agent_update_required",
+        detail: "connected agent did not advertise Android package launching",
+      });
     }
     const commandId = hub.queueLaunch(deviceId, {
       gameId: `installed:${resolved.packageName}`,

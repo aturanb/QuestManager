@@ -16,7 +16,9 @@ import {
   listDeviceApps,
 } from "./store.js";
 import {
+  LAUNCH_ANDROID_PACKAGE_CAPABILITY,
   parseAgentMessage,
+  type AgentCapability,
   type ServerCommand,
   type ServerError,
 } from "@cafequest/shared";
@@ -31,7 +33,7 @@ const AGENT_PING_MS = 5_000;
 export const AGENT_WS_PATH = "/agent-ws";
 export const DASHBOARD_WS_PATH = "/dashboard-ws";
 
-type DeviceConn = { socket: WebSocket; deviceId: string };
+type DeviceConn = { socket: WebSocket; deviceId: string; capabilities: ReadonlySet<AgentCapability> };
 type LaunchTarget =
   | { gameId: string; name: string; metaAppId: string; packageName?: never }
   | { gameId: string; name: string; packageName: string; metaAppId?: never };
@@ -81,7 +83,7 @@ export class Hub {
     return this.devices.has(id);
   }
 
-  addAgentSocket(deviceId: string, socket: WebSocket): void {
+  addAgentSocket(deviceId: string, socket: WebSocket, capabilities: readonly AgentCapability[] = []): void {
     const prev = this.devices.get(deviceId);
     if (prev && prev.socket !== socket) {
       // Newest hello wins; the stale socket is told why so it stops retrying blindly.
@@ -93,9 +95,13 @@ export class Hub {
       }
       this.log.warn({ device: deviceId }, "duplicate connection replaced");
     }
-    this.devices.set(deviceId, { socket, deviceId });
+    this.devices.set(deviceId, { socket, deviceId, capabilities: new Set(capabilities) });
     this.onDeviceChanged();
     this.pushDashboardState();
+  }
+
+  supportsPackageLaunch(deviceId: string): boolean {
+    return this.devices.get(deviceId)?.capabilities.has(LAUNCH_ANDROID_PACKAGE_CAPABILITY) ?? false;
   }
 
   removeAgentSocket(deviceId: string, socket: WebSocket): void {

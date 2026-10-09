@@ -104,6 +104,10 @@ catalog/manual matches, or an Android package ID for unmatched installed apps.
 The agent reports itself in the non-system inventory and uses the package's
 Leanback/launcher activity for the Android path.
 
+The package target is an additive protocol-v1 capability. Agent 0.4 advertises
+`launch_android_package` in its hello; an older connected agent receives an
+immediate `agent_update_required` response instead of a command it would ignore.
+
 Reason: sideloaded apps may have no Meta App ID at all. The community GitHub
 catalog remains valuable for identifying official apps and preserving Meta's
 supported `launchOtherApp` path, but it must not block a locally installed app.

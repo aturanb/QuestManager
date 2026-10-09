@@ -38,6 +38,18 @@ test("hello schema accepts a valid hello", () => {
   assert.equal(HelloSchema.safeParse(hello).success, true);
 });
 
+test("hello advertises package-launch support without breaking older agents", () => {
+  const capable = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package"],
+  });
+
+  assert.equal(capable.success, true);
+  if (capable.success) assert.deepEqual(capable.data.capabilities, ["launch_android_package"]);
+  assert.equal(HelloSchema.safeParse({ ...hello, capabilities: ["unknown_capability"] }).success, false);
+  assert.equal(HelloSchema.safeParse(hello).success, true);
+});
+
 test("telemetry schema rejects battery -50 and 900 (§33)", () => {
   assert.equal(TelemetrySchema.safeParse({ ...telemetry, battery: { level: -50, charging: false } }).success, false);
   assert.equal(TelemetrySchema.safeParse({ ...telemetry, battery: { level: 900, charging: false } }).success, false);

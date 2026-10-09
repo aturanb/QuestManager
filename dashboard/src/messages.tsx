@@ -133,7 +133,7 @@ const en = {
     failed: (error: string | null) => `Failed: ${error ?? "unknown error"}`,
     timedOut: "Timed out",
     inventory: (total: number) =>
-      `${total} ${total === 1 ? "app" : "apps"} on this headset, all ready to launch`,
+      `${total} installed ${total === 1 ? "app" : "apps"} reported by this headset`,
     appIds: (count: number) => `Installed app IDs (${count})`,
     appIdsHint: (button: string) =>
       `Apps without a Meta App ID launch by Android package. “${button}” can identify official Meta apps; add an ID manually only when the app has one.`,
@@ -166,6 +166,7 @@ const en = {
       "no active session to extend": "No running session to extend.",
       "no active session to stop": "No running session to stop.",
       app_not_installed: "That game isn't installed on this headset.",
+      agent_update_required: "Update CafeQuest Agent on this headset to launch apps by Android package.",
       meta_app_id_unknown: "This app has no Meta App ID yet.",
     } as Record<string, string>,
     // The server's English detail names the game and where to set its ID.
@@ -299,7 +300,7 @@ const tr: Messages = {
     launched: "Açıldı ✓",
     failed: (error) => `Açılamadı: ${error ?? "bilinmeyen hata"}`,
     timedOut: "Zaman aşımı",
-    inventory: (total) => `Bu gözlükte ${total} uygulama var, hepsi açılmaya hazır`,
+    inventory: (total) => `Bu gözlük ${total} yüklü uygulama bildirdi`,
     appIds: (count) => `Yüklü uygulama kimlikleri (${count})`,
     appIdsHint: (button) =>
       `Meta App ID'si olmayan uygulamalar Android paketiyle açılır. “${button}” resmi Meta uygulamalarını tanıyabilir; yalnızca uygulamanın Meta ID'si varsa elle ekleyin.`,
@@ -331,6 +332,7 @@ const tr: Messages = {
       "no active session to extend": "Uzatılacak bir seans yok.",
       "no active session to stop": "Durdurulacak bir seans yok.",
       app_not_installed: "Bu oyun bu gözlükte yüklü değil.",
+      agent_update_required: "Uygulamaları Android paketiyle açmak için bu gözlükteki CafeQuest Agent'ı güncelleyin.",
       meta_app_id_unknown: "Bu uygulamanın henüz Meta App ID'si yok.",
     },
     // The server's detail is English, so Turkish says it in general terms.

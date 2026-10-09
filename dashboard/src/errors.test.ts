@@ -19,6 +19,15 @@ describe("friendlyError", () => {
     );
   });
 
+  it("asks staff to update an older headset agent before package launching", () => {
+    expect(friendlyError(new ApiError(409, "agent_update_required"))).toBe(
+      "Update CafeQuest Agent on this headset to launch apps by Android package."
+    );
+    expect(friendlyError(new ApiError(409, "agent_update_required"), tr)).toBe(
+      "Uygulamaları Android paketiyle açmak için bu gözlükteki CafeQuest Agent'ı güncelleyin."
+    );
+  });
+
   it("passes through the server's explanation for an unconfigured game", () => {
     expect(friendlyError(new ApiError(400, "game_meta_app_id_not_configured", 'game "Beat Saber" still has a placeholder'))).toBe(
       'game "Beat Saber" still has a placeholder'

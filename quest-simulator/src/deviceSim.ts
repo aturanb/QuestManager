@@ -132,6 +132,7 @@ export class DeviceSim {
         deviceName: this.opts.name,
         deviceModel: this.opts.model ?? "Quest 3",
         agentVersion: "0.1.0-sim",
+        capabilities: ["launch_android_package"],
       });
       ws.send(JSON.stringify(hello));
       // Real agents report their inventory once per connection; the server needs

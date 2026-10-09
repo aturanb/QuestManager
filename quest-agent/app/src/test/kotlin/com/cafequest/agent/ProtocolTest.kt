@@ -10,6 +10,7 @@ class ProtocolTest {
         val json = protocolJson.encodeToString(h)
         assertTrue(json.contains("\"protocolVersion\":1"))
         assertTrue(json.contains("\"type\":\"hello\""))
+        assertTrue(json.contains("\"capabilities\":[\"launch_android_package\"]"))
         assertFalse(json.contains("enrollmentKey"))
     }
 

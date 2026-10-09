@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 
 const val PROTOCOL_VERSION = 1
 const val LOG_TAG = "CafeQuest"
+const val CAPABILITY_LAUNCH_ANDROID_PACKAGE = "launch_android_package"
 
 val protocolJson = Json {
     ignoreUnknownKeys = true
@@ -22,6 +23,7 @@ data class Hello(
     val deviceName: String,
     val deviceModel: String,
     val agentVersion: String,
+    val capabilities: List<String> = listOf(CAPABILITY_LAUNCH_ANDROID_PACKAGE),
 )
 
 @Serializable

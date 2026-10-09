@@ -171,7 +171,7 @@ describe("DeviceCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Launch game on Quest 01" }));
     expect(p.onLaunchInstalled).toHaveBeenCalledWith("d1", "com.example.beta");
     expect(p.onLaunch).not.toHaveBeenCalled();
-    expect(screen.getByText("2 apps on this headset, all ready to launch")).toBeInTheDocument();
+    expect(screen.getByText("2 installed apps reported by this headset")).toBeInTheDocument();
   });
 
   it("allows an unmatched installed package to be mapped manually", () => {
@@ -407,7 +407,7 @@ describe("DeviceCard in Turkish", () => {
     });
     renderTurkish(<DeviceCard {...p} />);
     expect(screen.getByText("Alpha VR, 12:34 süredir")).toBeInTheDocument();
-    expect(screen.getByText("Bu gözlükte 2 uygulama var, hepsi açılmaya hazır")).toBeInTheDocument();
+    expect(screen.getByText("Bu gözlük 2 yüklü uygulama bildirdi")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Beat Saber (Meta App ID gerekli)" })).toBeDisabled();
 
     fireEvent.click(screen.getByText("Yüklü uygulama kimlikleri (2)"));

@@ -29,7 +29,7 @@ const socket = {
   send(value: string) { sent.push(value); },
   close() {},
 };
-hub.addAgentSocket(deviceId, socket as any);
+hub.addAgentSocket(deviceId, socket as any, ["launch_android_package"]);
 
 test("installed_apps inventory is persisted and catalog matches appear in snapshots", async () => {
   hub.handleAgentMessage(deviceId, socket as any, JSON.stringify({
@@ -78,6 +78,31 @@ test("an unmatched sideloaded app launches by Android package name", async () =>
   assert.equal(command.payload.packageName, "com.example.unknown");
   assert.equal(command.payload.gameName, "Unknown Game");
   assert.equal("metaAppId" in command.payload, false);
+});
+
+test("an older connected agent is told to update before a package launch", async () => {
+  const oldDeviceId = randomUUID();
+  upsertDevice(db, { id: oldDeviceId, name: "Older Quest", model: "Quest 3", agentVersion: "0.3.0" });
+  const oldSocket = { send() {}, close() {} };
+  hub.addAgentSocket(oldDeviceId, oldSocket as any);
+  hub.handleAgentMessage(oldDeviceId, oldSocket as any, JSON.stringify({
+    type: "installed_apps",
+    protocolVersion: 1,
+    deviceId: oldDeviceId,
+    scannedAt: "2026-10-09T12:00:00.000Z",
+    apps: [
+      { packageName: "com.example.local", label: "Local App", versionName: "1.0", versionCode: 1 },
+    ],
+  }));
+
+  const launch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${oldDeviceId}/launch-installed`,
+    payload: { packageName: "com.example.local" },
+  });
+
+  assert.equal(launch.statusCode, 409);
+  assert.equal(launch.json().error, "agent_update_required");
 });
 
 test("admin can map an unknown installed package and launch it by package name", async () => {

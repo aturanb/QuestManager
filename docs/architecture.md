@@ -52,8 +52,11 @@ Agents: quest-simulator (test) or quest-agent APK (hardware)
   App ID to `launchOtherApp`. An unmatched package instead sends exactly one
   Android package ID; the agent resolves its Leanback/launcher activity and
   starts it as a new task. The GitHub catalog improves official-app metadata
-  but is not required for sideloaded apps. Physical Quest package launching is
-  `UNVERIFIED_HARDWARE` until morning-test row 5a passes.
+  but is not required for sideloaded apps. Protocol-v1 agents advertise the
+  additive `launch_android_package` capability; the server returns
+  `agent_update_required` instead of sending a command an older agent cannot
+  decode. Physical Quest package launching is `UNVERIFIED_HARDWARE` until
+  morning-test row 5a passes.
 
 ## Server discovery
 
