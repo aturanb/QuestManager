@@ -21,11 +21,11 @@ import {
   activeSessionForDevice,
   sweepExpiredSessions,
 } from "./store.js";
-import { Hub, AGENT_WS_PATH, DASHBOARD_WS_PATH, sendAgentError } from "./hub.js";
+import { Hub, AGENT_WS_PATH, DASHBOARD_WS_PATH } from "./hub.js";
 import { HelloSchema } from "@cafequest/shared";
 import { z } from "zod";
 import { DEFAULT_GAMES, isPlaceholderAppId, seedConfiguredGames, type ConfigGame } from "./config.js";
-import { isAdminAuthorized, isDashboardSocketAuthorized, isEnrolled, type AuthConfig } from "./auth.js";
+import { isAdminAuthorized, isDashboardSocketAuthorized, type AuthConfig } from "./auth.js";
 import { defaultCatalogPath, loadAppCatalog } from "./catalog.js";
 import { CATALOG_SOURCE_URL, catalogFetchedAt, refreshAppCatalog } from "./catalog-refresh.js";
 import { manualGameId, resolveInstalledApp } from "./installed-apps.js";
@@ -36,8 +36,6 @@ export type AppConfig = {
   host: string;
   /** When set, dashboard REST/WS require ADMIN_API_KEY; else open LAN-POC mode. */
   adminApiKey?: string;
-  /** When set, agent hello must carry DEVICE_ENROLLMENT_KEY; else open enrollment. */
-  deviceEnrollmentKey?: string;
   /** Game catalog seed (defaults to built-in placeholders); DB stays authoritative. */
   games?: ConfigGame[];
   /** Local package-name to Meta App ID cache; defaults to server/data/app-catalog.json. */
@@ -50,7 +48,7 @@ export type AppConfig = {
 export async function buildApp(cfg: AppConfig) {
   const db = openDb(cfg.dbPath);
   seedConfiguredGames(db, cfg.games ?? DEFAULT_GAMES);
-  const auth: AuthConfig = { adminApiKey: cfg.adminApiKey, deviceEnrollmentKey: cfg.deviceEnrollmentKey };
+  const auth: AuthConfig = { adminApiKey: cfg.adminApiKey };
   const appCatalogPath = cfg.appCatalogPath ?? defaultCatalogPath();
   // Reassigned by POST /api/catalog/refresh; route closures read the live binding.
   let appCatalog = loadAppCatalog(appCatalogPath);
@@ -67,9 +65,6 @@ export async function buildApp(cfg: AppConfig) {
     app.log.info("ADMIN_API_KEY set: dashboard REST/WebSocket require authorization");
   } else {
     app.log.warn("ADMIN_API_KEY not set: dashboard API is open (LAN POC mode)");
-  }
-  if (!auth.deviceEnrollmentKey) {
-    app.log.warn("DEVICE_ENROLLMENT_KEY not set: agent enrollment is open (LAN POC mode)");
   }
 
   // --- dashboard REST guard (§35): everything except health needs the admin key ---
@@ -107,12 +102,6 @@ export async function buildApp(cfg: AppConfig) {
         const hello = HelloSchema.safeParse(json);
         if (!hello.success) {
           socket.send(JSON.stringify({ type: "error", protocolVersion: 1, code: "MALFORMED_MESSAGE", message: "first message must be a valid hello" }));
-          return;
-        }
-        if (!isEnrolled(auth, hello.data.enrollmentKey)) {
-          sendAgentError(socket, "ENROLLMENT_REJECTED", "invalid or missing enrollment key");
-          socket.close(4401, "enrollment-rejected");
-          app.log.warn("agent enrollment rejected");
           return;
         }
         deviceId = hello.data.deviceId;

@@ -16,8 +16,6 @@ export const HelloSchema = z.object({
   deviceName: z.string().min(1).max(64),
   deviceModel: z.string().min(1).max(64),
   agentVersion: z.string().min(1).max(32),
-  // Presented at enrollment; required only when the server sets DEVICE_ENROLLMENT_KEY (§35).
-  enrollmentKey: z.string().min(1).max(128).optional(),
 });
 
 export const BatterySchema = z.object({
@@ -130,7 +128,6 @@ export const ServerErrorSchema = z.object({
     "MALFORMED_MESSAGE",
     "UNKNOWN_DEVICE",
     "DUPLICATE_DEVICE",
-    "ENROLLMENT_REJECTED",
     "DEVICE_MISMATCH",
     "UNKNOWN_COMMAND",
     "FOREIGN_COMMAND",

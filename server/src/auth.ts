@@ -1,8 +1,8 @@
-// Key checks for brief §35. Keys come from the environment (never committed);
-// when a key is unset the server runs open on the LAN and warns at boot.
+// Key checks for brief §35. The admin key comes from the environment; when it is
+// unset the dashboard runs open on the LAN and the server warns at boot. Agents
+// need no key (enrollment key removed 2026-10-09, docs/decisions.md).
 export type AuthConfig = {
   adminApiKey?: string;
-  deviceEnrollmentKey?: string;
 };
 
 /** Empty/whitespace-only env values count as unset. */
@@ -20,10 +20,4 @@ export function isAdminAuthorized(auth: AuthConfig, authorizationHeader: unknown
 export function isDashboardSocketAuthorized(auth: AuthConfig, keyParam: unknown): boolean {
   if (!auth.adminApiKey) return true;
   return keyParam === auth.adminApiKey;
-}
-
-/** Agent enrollment via hello.enrollmentKey (kept out of URLs so it never hits request logs). */
-export function isEnrolled(auth: AuthConfig, enrollmentKey: string | undefined): boolean {
-  if (!auth.deviceEnrollmentKey) return true;
-  return enrollmentKey === auth.deviceEnrollmentKey;
 }

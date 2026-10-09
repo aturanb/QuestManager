@@ -2,7 +2,7 @@
 // Launch N simulated Quest headsets against the real server.
 // Usage: npm run simulator -- --count 8 [--url http://localhost:3000]
 //        [--stable] [--behavior succeed|fail|timeout] [--disconnect-after 60]
-//        [--enrollment-key KEY] [--no-reconnect]
+//        [--no-reconnect]
 import { DeviceSim, stableDeviceId } from "./deviceSim.js";
 
 function arg(name: string, fallback: string | null): string | null {
@@ -19,7 +19,6 @@ const stable = arg("stable", null) !== null;
 const behavior = (arg("behavior", "succeed") ?? "succeed") as "succeed" | "fail" | "timeout";
 const launchBehavior = behavior === "timeout" ? "never-complete" : behavior;
 const disconnectAfter = Number(arg("disconnect-after", null) ?? "0");
-const enrollmentKey = arg("enrollment-key", process.env.CAFEQUEST_ENROLLMENT_KEY ?? null) ?? undefined;
 const reconnect = arg("no-reconnect", null) === null;
 
 const sims: DeviceSim[] = [];
@@ -34,7 +33,6 @@ for (let i = 1; i <= count; i++) {
     battery: { level, charging: i % 4 === 0 },
     launchBehavior,
     reconnect,
-    enrollmentKey,
     log: (m) => console.log(`[sim] ${m}`),
   });
   sims.push(sim);

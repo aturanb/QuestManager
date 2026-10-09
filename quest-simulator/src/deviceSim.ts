@@ -9,7 +9,6 @@ export type DeviceSimOptions = {
   name: string;
   model?: string;
   serverUrl: string; // ws://host:port
-  enrollmentKey?: string;
   battery: BatteryState;
   telemetryIntervalMs?: number;
   launchBehavior?: "succeed" | "fail" | "never-complete";
@@ -132,7 +131,6 @@ export class DeviceSim {
         deviceName: this.opts.name,
         deviceModel: this.opts.model ?? "Quest 3",
         agentVersion: "0.1.0-sim",
-        ...(this.opts.enrollmentKey ? { enrollmentKey: this.opts.enrollmentKey } : {}),
       });
       ws.send(JSON.stringify(hello));
       // Real agents report their inventory once per connection; the server needs

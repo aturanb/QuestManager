@@ -1,5 +1,6 @@
-// Auth contract (P0-A/C, brief §35): ADMIN_API_KEY guards dashboard REST+WS,
-// DEVICE_ENROLLMENT_KEY guards agent enrollment, and secrets never hit logs.
+// Auth contract (P0-A/C, brief §35): ADMIN_API_KEY guards dashboard REST+WS and
+// never hits logs. Agents need no key: the enrollment key was removed on
+// 2026-10-09 (LAN-only café, docs/decisions.md "No enrollment key").
 import assert from "node:assert/strict";
 import { test, after } from "node:test";
 import WebSocket from "ws";
@@ -7,7 +8,6 @@ import { randomUUID } from "node:crypto";
 import { buildApp } from "../src/app.js";
 
 const ADMIN = "test-admin-key-123";
-const ENROLL = "test-enroll-key-456";
 
 function streamLogger() {
   let text = "";
@@ -19,7 +19,7 @@ function streamLogger() {
 const logs = streamLogger();
 const locked = await buildApp({
   dbPath: ":memory:", port: 0, host: "127.0.0.1",
-  adminApiKey: ADMIN, deviceEnrollmentKey: ENROLL, logger: { level: "info", stream: logs.stream as any },
+  adminApiKey: ADMIN, logger: { level: "info", stream: logs.stream as any },
 });
 await locked.app.listen({ port: 0, host: "127.0.0.1" });
 const laddr = locked.app.server.address();
@@ -57,33 +57,31 @@ test("dashboard WS without key is refused; with key connects and gets state", as
   good.close();
 });
 
-test("agent hello without/with enrollment key", async () => {
-  const id = randomUUID();
-  const noKey = new WebSocket(`${lws}/agent-ws`);
-  await new Promise<void>((r) => noKey.on("open", () => r()));
-  noKey.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: id, deviceName: "Q", deviceModel: "M", agentVersion: "1" }));
-  const err: any = await new Promise((r) => noKey.on("message", (m) => r(JSON.parse(String(m)))));
-  assert.equal(err.code, "ENROLLMENT_REJECTED");
-  await new Promise((r) => noKey.on("close", () => r(null)));
-  const yesKey = new WebSocket(`${lws}/agent-ws`);
-  await new Promise<void>((r) => yesKey.on("open", () => r()));
-  yesKey.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: id, deviceName: "Q", deviceModel: "M", agentVersion: "1", enrollmentKey: ENROLL }));
-  await new Promise((r) => setTimeout(r, 200));
-  assert.equal(yesKey.readyState, WebSocket.OPEN);
-  const dev = await (await fetch(`${lbase}/api/devices`, { headers: auth })).json() as any;
-  assert.ok(dev.devices.some((d: any) => d.id === id));
-  yesKey.close();
+test("agents need no key; a leftover enrollmentKey from a 0.2.0 APK is ignored", async () => {
+  for (const extra of [{}, { enrollmentKey: "left-over-from-0.2.0" }]) {
+    const id = randomUUID();
+    const agent = new WebSocket(`${lws}/agent-ws`);
+    await new Promise<void>((r) => agent.on("open", () => r()));
+    agent.send(JSON.stringify({ type: "hello", protocolVersion: 1, deviceId: id, deviceName: "Q", deviceModel: "M", agentVersion: "1", ...extra }));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(agent.readyState, WebSocket.OPEN, JSON.stringify(extra));
+    const dev = await (await fetch(`${lbase}/api/devices`, { headers: auth })).json() as any;
+    assert.ok(dev.devices.some((d: any) => d.id === id), JSON.stringify(extra));
+    agent.close();
+  }
+});
+
+test("the server no longer mentions an enrollment key at boot", () => {
+  assert.ok(!logs.text().includes("DEVICE_ENROLLMENT_KEY"), "boot log still mentions DEVICE_ENROLLMENT_KEY");
 });
 
 test("secrets never appear in server logs", async () => {
-  // exercise authed REST + both websockets, then grep the captured log stream
+  // exercise authed REST + the dashboard websocket, then grep the captured log stream
   await fetch(`${lbase}/api/devices`, { headers: auth });
   const ws = new WebSocket(`${lws}/dashboard-ws?key=${ADMIN}`);
   await new Promise((r) => ws.on("message", () => r(null)));
   ws.close();
-  const text = logs.text();
-  assert.ok(!text.includes(ADMIN), "admin key leaked into logs");
-  assert.ok(!text.includes(ENROLL), "enrollment key leaked into logs");
+  assert.ok(!logs.text().includes(ADMIN), "admin key leaked into logs");
 });
 
 // --- open (unconfigured) server ----------------------------------------------
@@ -93,7 +91,7 @@ const oaddr = open.app.server.address();
 const oport = typeof oaddr === "object" && oaddr ? oaddr.port : 0;
 after(() => open.app.close());
 
-test("unconfigured keys leave the LAN-POC server open (documented, warned)", async () => {
+test("an unset admin key leaves the LAN-POC dashboard open (documented, warned)", async () => {
   const r = await fetch(`http://127.0.0.1:${oport}/api/devices`);
   assert.equal(r.status, 200);
 });

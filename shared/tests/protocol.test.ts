@@ -108,14 +108,18 @@ test("command_ack and command_result require owning deviceId", () => {
   assert.equal(CommandResultSchema.safeParse(resNoId).success, false);
 });
 
-test("hello accepts optional enrollmentKey", () => {
-  assert.equal(HelloSchema.safeParse({ ...hello, enrollmentKey: "cafe-secret" }).success, true);
-  assert.equal(HelloSchema.safeParse(hello).success, true);
-  assert.equal(HelloSchema.safeParse({ ...hello, enrollmentKey: "" }).success, false);
+test("a hello from a 0.2.0 agent still carrying enrollmentKey parses without it", () => {
+  const parsed = HelloSchema.safeParse({ ...hello, enrollmentKey: "cafe-secret" });
+  assert.equal(parsed.success, true);
+  if (parsed.success) assert.equal("enrollmentKey" in parsed.data, false);
 });
 
-test("server error schema carries ownership/auth codes", () => {
-  for (const code of ["ENROLLMENT_REJECTED", "DEVICE_MISMATCH", "UNKNOWN_COMMAND", "FOREIGN_COMMAND", "DUPLICATE_DEVICE"]) {
+test("server error schema carries ownership codes, and no enrollment code", () => {
+  assert.equal(
+    ServerErrorSchema.safeParse({ type: "error", protocolVersion: 1, code: "ENROLLMENT_REJECTED", message: "x" }).success,
+    false,
+  );
+  for (const code of ["DEVICE_MISMATCH", "UNKNOWN_COMMAND", "FOREIGN_COMMAND", "DUPLICATE_DEVICE"]) {
     assert.equal(
       ServerErrorSchema.safeParse({ type: "error", protocolVersion: 1, code, message: "x" }).success,
       true,

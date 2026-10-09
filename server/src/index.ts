@@ -20,10 +20,9 @@ const dbPath = nonBlankEnv(process.env.DB_PATH)
 
 const { config, path: configPath, found } = loadCafeQuestConfig();
 const adminApiKey = normKey(process.env.ADMIN_API_KEY);
-const deviceEnrollmentKey = normKey(process.env.DEVICE_ENROLLMENT_KEY);
 
 const { app } = await buildApp({
-  dbPath, port, host, adminApiKey, deviceEnrollmentKey, games: config.games,
+  dbPath, port, host, adminApiKey, games: config.games,
 });
 app.log.info({ configPath, found }, found ? "loaded cafequest.config.json" : "no cafequest.config.json; using built-in defaults");
 if (config.games.length > 0 && config.games.every((g) => isPlaceholderAppId(g.metaAppId))) {
