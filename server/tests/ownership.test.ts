@@ -134,3 +134,20 @@ test("reconnect with a stale last_seen_at stays connected (hello proves liveness
   assert.ok(d && d.online === true, "reconnected device is online");
   ws.close();
 });
+
+test("a silent agent whose socket answers pings stays online (pong proves liveness)", async () => {
+  const quietId = randomUUID();
+  const ws = await connect(quietId, "Quest Asleep");
+  // No telemetry from here on, like a sleeping headset whose timers are frozen.
+  // Without another liveness signal it goes stale 6s from now and is dropped.
+  db.prepare("UPDATE devices SET last_seen_at = ? WHERE id = ?").run(
+    new Date(Date.now() - 9_000).toISOString(), quietId
+  );
+  await new Promise((r) => setTimeout(r, 8_000));
+  assert.equal(ws.readyState, WebSocket.OPEN, "sweep must not drop a socket that answers pings");
+  const res = await fetch(`http://127.0.0.1:${port}/api/devices`);
+  const body: any = await res.json();
+  const d = (body.devices as any[]).find((x) => x.id === quietId);
+  assert.ok(d && d.online === true, "silent but reachable device is online");
+  ws.close();
+});

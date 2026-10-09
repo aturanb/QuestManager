@@ -219,28 +219,31 @@ function mapSession(r: any): SessionRow {
     id: r.id,
     deviceId: r.device_id,
     startedAt: r.started_at,
-    endsAt: r.ends_at,
+    // ends_at is NOT NULL, so a running unlimited session keeps its start there.
+    endsAt: r.open_ended && r.status === "active" ? null : r.ends_at,
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-export function createSession(db: Db, deviceId: string, minutes: number): SessionRow {
+/** `minutes: null` starts an unlimited session: it never expires and only staff stop it. */
+export function createSession(db: Db, deviceId: string, minutes: number | null): SessionRow {
   const now = new Date();
-  const ends = new Date(now.getTime() + minutes * 60_000);
+  const ends = new Date(now.getTime() + (minutes ?? 0) * 60_000);
   const row = {
     id: uuid(),
     device_id: deviceId,
     started_at: now.toISOString(),
     ends_at: ends.toISOString(),
     status: "active",
+    open_ended: minutes === null ? 1 : 0,
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
   };
   db.prepare(
-    `INSERT INTO sessions (id, device_id, started_at, ends_at, status, created_at, updated_at)
-     VALUES (@id, @device_id, @started_at, @ends_at, @status, @created_at, @updated_at)`
+    `INSERT INTO sessions (id, device_id, started_at, ends_at, status, open_ended, created_at, updated_at)
+     VALUES (@id, @device_id, @started_at, @ends_at, @status, @open_ended, @created_at, @updated_at)`
   ).run(row);
   return mapSession(row);
 }
@@ -259,18 +262,22 @@ export function activeSessionForDevice(db: Db, deviceId: string): SessionRow | n
   return r ? mapSession(r) : null;
 }
 
-/** Latest session shown on the dashboard; stopped sessions clear the card. */
+/**
+ * Latest session shown on the dashboard; stopped sessions clear the card,
+ * except an unlimited one, which stays until the next session so staff can
+ * read the time to charge.
+ */
 export function dashboardSessionForDevice(db: Db, deviceId: string): SessionRow | null {
   const r = db
     .prepare(`SELECT * FROM sessions WHERE device_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`)
     .get(deviceId) as any;
-  if (!r || (r.status !== "active" && r.status !== "expired")) return null;
-  return mapSession(r);
+  const shown = r && (r.status === "active" || r.status === "expired" || (r.status === "stopped" && r.open_ended));
+  return shown ? mapSession(r) : null;
 }
 
 export function extendSession(db: Db, id: string, minutes: number): SessionRow | null {
   const s = getSession(db, id);
-  if (!s || s.status !== "active") return null;
+  if (!s || s.status !== "active" || s.endsAt === null) return null;
   const newEnds = new Date(new Date(s.endsAt).getTime() + minutes * 60_000).toISOString();
   db.prepare("UPDATE sessions SET ends_at = ?, updated_at = ? WHERE id = ?").run(newEnds, nowIso(), id);
   return getSession(db, id);
@@ -279,7 +286,12 @@ export function extendSession(db: Db, id: string, minutes: number): SessionRow |
 export function stopSession(db: Db, id: string): SessionRow | null {
   const s = getSession(db, id);
   if (!s || s.status !== "active") return null;
-  db.prepare("UPDATE sessions SET status = 'stopped', updated_at = ? WHERE id = ?").run(nowIso(), id);
+  // An unlimited session ends when staff stop it; a timed one keeps its paid end.
+  db.prepare(
+    `UPDATE sessions SET status = 'stopped', updated_at = @now,
+       ends_at = CASE WHEN open_ended = 1 THEN @now ELSE ends_at END
+     WHERE id = @id`
+  ).run({ now: nowIso(), id });
   return getSession(db, id);
 }
 
@@ -287,7 +299,8 @@ export function stopSession(db: Db, id: string): SessionRow | null {
 export function sweepExpiredSessions(db: Db): number {
   const r = db
     .prepare(
-      `UPDATE sessions SET status = 'expired', updated_at = ? WHERE status = 'active' AND ends_at <= ?`
+      `UPDATE sessions SET status = 'expired', updated_at = ?
+       WHERE status = 'active' AND open_ended = 0 AND ends_at <= ?`
     )
     .run(nowIso(), nowIso());
   return r.changes;

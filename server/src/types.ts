@@ -42,7 +42,8 @@ export type SessionRow = {
   id: string;
   deviceId: string;
   startedAt: string;
-  endsAt: string;
+  /** null while an unlimited session runs; stopping one records when play ended. */
+  endsAt: string | null;
   status: "active" | "expired" | "stopped";
   createdAt: string;
   updatedAt: string;

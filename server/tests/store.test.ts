@@ -155,7 +155,7 @@ test("sessions: create, one active per device, extend, stop, expire sweep", asyn
   const s2 = createSession(db, "d1", 30);
   assert.notEqual(s2.id, s.id);
   const ext = extendSession(db, s.id, 15);
-  assert.ok(new Date(ext!.endsAt).getTime() > new Date(s.endsAt).getTime());
+  assert.ok(new Date(ext!.endsAt!).getTime() > new Date(s.endsAt!).getTime());
   assert.equal(stopSession(db, s.id)!.status, "stopped");
   assert.equal(extendSession(db, s.id, 15), null);
   // expiry: craft an active session already in the past
@@ -169,7 +169,7 @@ test("sessions: create, one active per device, extend, stop, expire sweep", asyn
   assert.equal(dashboardSessionForDevice(db, "d1")!.status, "expired");
 });
 
-test("dashboard session shows only the latest active or expired session", () => {
+test("dashboard session shows the latest active or expired session; stopping a timed one clears it", () => {
   upsertDevice(db, { id: "d1", name: "Quest 01" });
   const expiredAt = new Date(Date.now() - 60_000).toISOString();
   db.prepare(`INSERT INTO sessions (id, device_id, started_at, ends_at, status, created_at, updated_at)
@@ -181,6 +181,45 @@ test("dashboard session shows only the latest active or expired session", () => 
 
   stopSession(db, active.id);
   assert.equal(dashboardSessionForDevice(db, "d1"), null);
+});
+
+test("an unlimited session has no end, so the expiry sweep never closes it", () => {
+  upsertDevice(db, { id: "d1", name: "Quest 01" });
+  const s = createSession(db, "d1", null);
+  assert.equal(s.endsAt, null);
+  assert.equal(sweepExpiredSessions(db), 0);
+  assert.equal(getSession(db, s.id)!.status, "active");
+});
+
+test("an unlimited session has nothing to extend", () => {
+  upsertDevice(db, { id: "d1", name: "Quest 01" });
+  const s = createSession(db, "d1", null);
+  assert.equal(extendSession(db, s.id, 15), null);
+  assert.equal(getSession(db, s.id)!.endsAt, null);
+});
+
+test("stopping an unlimited session records when play ended", async () => {
+  upsertDevice(db, { id: "d1", name: "Quest 01" });
+  const s = createSession(db, "d1", null);
+  // Without the gap, a time written at creation could pass for the stop time.
+  await new Promise((r) => setTimeout(r, 5));
+  const before = Date.now();
+  const stopped = stopSession(db, s.id)!;
+  const after = Date.now();
+  assert.equal(stopped.status, "stopped");
+  const endedAt = new Date(stopped.endsAt ?? 0).getTime();
+  assert.ok(endedAt >= before && endedAt <= after, `ended at ${stopped.endsAt}`);
+});
+
+test("a stopped unlimited session stays on the dashboard until the next session starts", () => {
+  upsertDevice(db, { id: "d1", name: "Quest 01" });
+  const open = createSession(db, "d1", null);
+  stopSession(db, open.id);
+  assert.equal(dashboardSessionForDevice(db, "d1")?.id, open.id);
+  assert.equal(dashboardSessionForDevice(db, "d1")?.status, "stopped");
+
+  const next = createSession(db, "d1", 30);
+  assert.equal(dashboardSessionForDevice(db, "d1")?.id, next.id);
 });
 
 test("commands: create, mark received, mark success, timeout sweep", async () => {
@@ -244,5 +283,29 @@ test("openDb migrates a pre-inventory database without dropping existing games",
   assert.ok(columns.some((column) => column.name === "package_name"));
   assert.equal(migrated.prepare("SELECT name FROM games WHERE id = 'legacy'").pluck().get(), "Legacy Game");
   assert.ok(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'device_apps'").pluck().get());
+  migrated.close();
+});
+
+test("openDb migrates a pre-unlimited sessions table, keeping its sessions timed", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cq-legacy-"));
+  const dbPath = path.join(dir, "legacy.db");
+  const legacy = new Database(dbPath);
+  legacy.exec(`
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      device_id TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ends_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO sessions VALUES ('legacy', 'd1', '2026-01-01T10:00:00.000Z', '2026-01-01T11:00:00.000Z', 'active', 't', 't');
+  `);
+  legacy.close();
+
+  const migrated = openDb(dbPath);
+  assert.equal(getSession(migrated, "legacy")!.endsAt, "2026-01-01T11:00:00.000Z");
+  assert.equal(createSession(migrated, "d2", null).endsAt, null);
   migrated.close();
 });

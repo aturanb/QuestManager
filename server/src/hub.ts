@@ -21,12 +21,13 @@ import {
   type ServerError,
 } from "@cafequest/shared";
 import type { AppCatalog } from "./catalog.js";
-import { resolveInstalledApp } from "./installed-apps.js";
+import { isIgnoredPackage, resolveInstalledApp } from "./installed-apps.js";
 
 export const OFFLINE_MS = 15_000;
 export const COMMAND_TIMEOUT_MS = 10_000;
 const SWEEP_INTERVAL_MS = 1_000;
 const DASHBOARD_PUSH_MS = 1_000;
+const AGENT_PING_MS = 5_000;
 export const AGENT_WS_PATH = "/agent-ws";
 export const DASHBOARD_WS_PATH = "/dashboard-ws";
 
@@ -61,6 +62,7 @@ export class Hub {
   start(): void {
     this.timers.push(setInterval(() => this.sweep(), SWEEP_INTERVAL_MS));
     this.timers.push(setInterval(() => this.pushDashboardState(), DASHBOARD_PUSH_MS));
+    this.timers.push(setInterval(() => this.pingAgents(), AGENT_PING_MS));
   }
 
   stop(): void {
@@ -148,15 +150,16 @@ export class Hub {
       setExpectedGame(this.db, deviceId, msg.expectedCurrentGame);
       this.log.debug({ device: deviceId, battery: msg.battery.level }, "telemetry");
     } else if (msg.type === "installed_apps") {
+      const apps = msg.apps.filter((app) => !isIgnoredPackage(app.packageName));
       try {
-        replaceDeviceApps(this.db, deviceId, msg.apps, msg.scannedAt);
+        replaceDeviceApps(this.db, deviceId, apps, msg.scannedAt);
       } catch (error) {
         this.log.error({ device: deviceId, err: error }, "failed to persist installed app inventory");
         sendAgentError(socket, "INTERNAL", "failed to persist installed app inventory");
         return;
       }
       touchDevice(this.db, deviceId, {});
-      this.log.info({ device: deviceId, count: msg.apps.length }, "installed app inventory updated");
+      this.log.info({ device: deviceId, count: apps.length }, "installed app inventory updated");
       this.pushDashboardState();
     } else if (msg.type === "command_ack" || msg.type === "command_result") {
       this.handleCommandMessage(deviceId, socket, msg);
@@ -227,6 +230,22 @@ export class Hub {
     markCommand(this.db, commandId, "sent");
     conn.socket.send(JSON.stringify(command));
     this.log.info({ device: deviceId, game: game.name, commandId }, "launch command sent");
+  }
+
+  /**
+   * A headset can stop sending telemetry (suspected: asleep) while its
+   * WebSocket stack still answers pings; the pong refreshes liveness (see the
+   * agent route). Without it the sweep dropped such a socket every ~16s and the
+   * agent reconnected 1s later: the Online flicker.
+   */
+  private pingAgents(): void {
+    for (const conn of this.devices.values()) {
+      try {
+        conn.socket.ping();
+      } catch {
+        /* already gone; the sweep drops it */
+      }
+    }
   }
 
   private sweep(): void {

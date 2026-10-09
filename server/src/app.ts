@@ -15,6 +15,7 @@ import {
   getGameByPackage,
   getDeviceApp,
   createSession,
+  getSession,
   extendSession,
   stopSession,
   activeSessionForDevice,
@@ -130,6 +131,12 @@ export async function buildApp(cfg: AppConfig) {
         return;
       }
       hub.handleAgentMessage(deviceId, socket, text);
+    });
+
+    // Reply to the hub's ping: proves the socket is alive even while the
+    // agent's telemetry timer is stalled, so it refreshes liveness too.
+    socket.on("pong", () => {
+      if (deviceId) touchDevice(db, deviceId, {});
     });
 
     socket.on("close", () => {
@@ -288,7 +295,8 @@ export async function buildApp(cfg: AppConfig) {
   // --- REST: sessions -----------------------------------------------------------
   app.post("/api/devices/:deviceId/sessions", async (req, reply) => {
     const { deviceId } = req.params as { deviceId: string };
-    const body = z.object({ minutes: z.number().int().min(1).max(24 * 60) }).safeParse(req.body);
+    // minutes: null starts an unlimited session; leaving minutes out is still invalid.
+    const body = z.object({ minutes: z.number().int().min(1).max(24 * 60).nullable() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "invalid session body" });
     const device = getDevice(db, deviceId);
     if (!device) return reply.code(404).send({ error: "device not found" });
@@ -303,6 +311,7 @@ export async function buildApp(cfg: AppConfig) {
     const { sessionId } = req.params as { sessionId: string };
     const body = z.object({ minutes: z.number().int().min(1).max(4 * 60) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "invalid extend body" });
+    if (getSession(db, sessionId)?.endsAt === null) return reply.code(409).send({ error: "session has no time limit" });
     const session = extendSession(db, sessionId, body.data.minutes);
     if (!session) return reply.code(409).send({ error: "no active session to extend" });
     return { session };

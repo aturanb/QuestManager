@@ -56,6 +56,7 @@ export function openDb(path: string): Db {
       started_at TEXT NOT NULL,
       ends_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
+      open_ended INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -93,6 +94,11 @@ export function openDb(path: string): Db {
   }
   if (!deviceColumns.some((column) => column.name === "foreground_started_at")) {
     db.exec("ALTER TABLE devices ADD COLUMN foreground_started_at TEXT");
+  }
+  // Sessions recorded before unlimited ones existed stay timed.
+  const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!sessionColumns.some((column) => column.name === "open_ended")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN open_ended INTEGER NOT NULL DEFAULT 0");
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_games_package_name ON games(package_name) WHERE package_name IS NOT NULL");
   return db;

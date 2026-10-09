@@ -116,3 +116,25 @@ test("launch-installed rejects packages not reported by that headset", async () 
   assert.equal(response.statusCode, 400);
   assert.equal(response.json().error, "app_not_installed");
 });
+
+test("Meta system packages a headset reports are left out of its inventory", async () => {
+  const questId = randomUUID();
+  upsertDevice(db, { id: questId, name: "Quest Meta Apps", model: "Quest 3", agentVersion: "0.1.0" });
+  const questSocket = { send() {}, close() {} };
+  hub.addAgentSocket(questId, questSocket as any);
+  hub.handleAgentMessage(questId, questSocket as any, JSON.stringify({
+    type: "installed_apps",
+    protocolVersion: 1,
+    deviceId: questId,
+    scannedAt: "2026-10-09T12:00:00.000Z",
+    apps: [
+      { packageName: "com.TriangleFactory.Breachers", label: "Breachers", versionName: "1.0", versionCode: 10 },
+      { packageName: "com.meta.handseducationmodule", label: "handseducationmodule", versionName: null, versionCode: null },
+      { packageName: "com.oculus.accountscenter", label: "Accounts Center", versionName: null, versionCode: null },
+    ],
+  }));
+
+  const response = await app.inject({ method: "GET", url: "/api/devices" });
+  const device = response.json().devices.find((d: any) => d.id === questId);
+  assert.deepEqual(device.installedApps.map((a: any) => a.packageName), ["com.TriangleFactory.Breachers"]);
+});

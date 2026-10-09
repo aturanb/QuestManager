@@ -4,6 +4,20 @@ import type { Db } from "./db.js";
 import { getGameByPackage } from "./store.js";
 import type { DeviceAppRow } from "./types.js";
 
+/**
+ * Meta system components that Quest installs as ordinary user packages, so the
+ * agent's non-system filter lets them through. They are not games and have no
+ * Meta App ID; without this the dashboard asks staff for one forever.
+ */
+const IGNORED_PACKAGES: ReadonlySet<string> = new Set([
+  "com.meta.handseducationmodule",
+  "com.oculus.accountscenter",
+]);
+
+export function isIgnoredPackage(packageName: string): boolean {
+  return IGNORED_PACKAGES.has(packageName);
+}
+
 export type ResolvedInstalledApp = Omit<DeviceAppRow, "deviceId" | "scannedAt"> & {
   name: string;
   metaAppId: string | null;
