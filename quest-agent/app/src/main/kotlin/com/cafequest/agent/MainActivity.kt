@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,21 +52,41 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
+/** The active language's words; screens read them instead of hard-coding English. */
+val LocalStrings = staticCompositionLocalOf<AgentStrings> { EnglishStrings }
+
 /** Setup (§38) + diagnostics (§37) screens. No secrets are ever logged. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = IdentityStore(this)
+        val languages = LanguageStore(this)
         setContent {
-            CafeQuestTheme {
-                Surface(Modifier.fillMaxSize(), color = CqColors.Board) {
-                    Screens(store, onStartService = { action -> startAgentService(action) })
+            var language by remember { mutableStateOf(languages.load()) }
+            CompositionLocalProvider(LocalStrings provides language.strings) {
+                CafeQuestTheme {
+                    Surface(Modifier.fillMaxSize(), color = CqColors.Board) {
+                        Screens(
+                            store,
+                            language = language,
+                            onLanguage = { picked ->
+                                languages.save(picked)
+                                language = picked
+                                // Any start re-posts the service notification, now in the picked language.
+                                startAgentService()
+                            },
+                            onStartService = { action -> startAgentService(action) },
+                        )
+                    }
                 }
             }
         }
@@ -76,7 +100,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Screens(store: IdentityStore, onStartService: (String?) -> Unit) {
+fun Screens(
+    store: IdentityStore,
+    language: AgentLanguage,
+    onLanguage: (AgentLanguage) -> Unit,
+    onStartService: (String?) -> Unit,
+) {
+    val s = LocalStrings.current
     val scope = rememberCoroutineScope()
     var identity by remember { mutableStateOf<AgentIdentity?>(null) }
     var tab by remember { mutableStateOf(0) } // 0 = diagnostics, 1 = setup
@@ -94,9 +124,16 @@ fun Screens(store: IdentityStore, onStartService: (String?) -> Unit) {
             Modifier.widthIn(max = 1040.dp).fillMaxWidth().padding(horizontal = 32.dp, vertical = 28.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text("CafeQuest", style = MaterialTheme.typography.titleMedium)
-                Text("Agent ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    LanguageSwitch(language, onLanguage)
+                    Text(s.agentVersion(BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                }
             }
             if (tab == 0) {
                 DiagnosticsScreen(
@@ -128,12 +165,13 @@ fun DiagnosticsScreen(
     diagnostics: AgentDiagnosticsState,
     onOpenSetup: () -> Unit,
 ) {
+    val s = LocalStrings.current
     val ctx = LocalContext.current
     val send = { action: String ->
         ctx.startForegroundService(Intent(ctx, AgentService::class.java).setAction(action))
         Unit
     }
-    val link = linkStatus(diagnostics.connection, identity?.serverHost, identity?.serverPort)
+    val link = linkStatus(diagnostics.connection, identity?.serverHost, identity?.serverPort, s)
 
     val status: @Composable () -> Unit = {
         Panel(rail = link.tone.color()) {
@@ -144,18 +182,18 @@ fun DiagnosticsScreen(
     }
     val facts: @Composable () -> Unit = {
         Panel {
-            Fact("Server") { FactText(identity?.let { "${it.serverHost}:${it.serverPort}" } ?: "…") }
-            Fact("Battery") {
+            Fact(s.server) { FactText(identity?.let { "${it.serverHost}:${it.serverPort}" } ?: "…") }
+            Fact(s.battery) {
                 val battery = diagnostics.battery
                 if (battery == null) FactText("…") else BatteryGauge(battery.level, battery.charging)
             }
-            Fact("Service") { FactText(if (diagnostics.serviceRunning) "Running" else "Stopped") }
-            Fact("Last launched") { FactText(diagnostics.expectedGame?.name ?: "—") }
-            Fact("Last command") { FactText(diagnostics.lastCommand) }
-            Fact("Last result") {
+            Fact(s.service) { FactText(if (diagnostics.serviceRunning) s.running else s.stopped) }
+            Fact(s.lastLaunched) { FactText(diagnostics.expectedGame?.name ?: "—") }
+            Fact(s.lastCommand) { FactText(diagnostics.lastCommand) }
+            Fact(s.lastResult) {
                 val result = diagnostics.lastResult
                 FactText(
-                    result,
+                    displayResult(result, s),
                     color = when {
                         result == "SUCCESS" -> CqColors.Ready
                         result.startsWith("FAILED") -> CqColors.Alert
@@ -167,11 +205,11 @@ fun DiagnosticsScreen(
     }
     val actions: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PrimaryAction("Reconnect") { send(AgentService.ACTION_RECONNECT) }
-            SecondaryAction("Send test telemetry") { send(AgentService.ACTION_TELEMETRY) }
-            SecondaryAction("Test app launch") { send(AgentService.ACTION_TEST_LAUNCH) }
+            PrimaryAction(s.reconnect) { send(AgentService.ACTION_RECONNECT) }
+            SecondaryAction(s.sendTestTelemetry) { send(AgentService.ACTION_TELEMETRY) }
+            SecondaryAction(s.testAppLaunch) { send(AgentService.ACTION_TEST_LAUNCH) }
             TextButton(onClick = onOpenSetup, modifier = Modifier.height(48.dp)) {
-                Text("Change setup", style = MaterialTheme.typography.labelLarge, color = CqColors.ChalkDim)
+                Text(s.changeSetup, style = MaterialTheme.typography.labelLarge, color = CqColors.ChalkDim)
             }
         }
     }
@@ -198,6 +236,7 @@ fun DiagnosticsScreen(
 
 @Composable
 fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> Unit, onCancel: () -> Unit) {
+    val s = LocalStrings.current
     val scope = rememberCoroutineScope()
     var name by remember(identity) { mutableStateOf(identity?.deviceName ?: "") }
     var host by remember(identity) { mutableStateOf(identity?.serverHost ?: "") }
@@ -207,19 +246,19 @@ fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> U
     var enroll by remember(identity) { mutableStateOf(identity?.enrollmentKey ?: "") }
     var meta by remember(identity) { mutableStateOf(identity?.metaAppId?.takeUnless { it == UNCONFIGURED_APP_ID } ?: "") }
     Panel {
-        Text("Headset setup", style = MaterialTheme.typography.headlineSmall)
+        Text(s.setupTitle, style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Filled in from the café PC's settings. A field left blank keeps its saved value.",
+            s.setupHint,
             style = MaterialTheme.typography.bodyMedium,
             color = CqColors.ChalkDim,
         )
-        SetupField("Device name", name) { name = it }
-        SetupField("Server host", host) { host = it }
-        SetupField("Server port", port, KeyboardType.Number) { port = it }
-        SetupField("Enrollment key", enroll) { enroll = it }
-        SetupField("Meta App ID", meta, KeyboardType.Number) { meta = it }
+        SetupField(s.deviceName, name) { name = it }
+        SetupField(s.serverHost, host) { host = it }
+        SetupField(s.serverPort, port, KeyboardType.Number) { port = it }
+        SetupField(s.enrollmentKey, enroll) { enroll = it }
+        SetupField(s.metaAppId, meta, KeyboardType.Number) { meta = it }
         Spacer(Modifier.height(4.dp))
-        PrimaryAction("Save and connect") {
+        PrimaryAction(s.saveAndConnect) {
             scope.launch {
                 store.save(AgentSetupInput(
                     deviceName = name,
@@ -232,7 +271,39 @@ fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> U
             }
         }
         TextButton(onClick = onCancel, modifier = Modifier.height(48.dp)) {
-            Text("Cancel", style = MaterialTheme.typography.labelLarge, color = CqColors.ChalkDim)
+            Text(s.cancel, style = MaterialTheme.typography.labelLarge, color = CqColors.ChalkDim)
+        }
+    }
+}
+
+/** EN | TR, the same two-way switch as the dashboard header; the pressed side is live. */
+@Composable
+private fun LanguageSwitch(current: AgentLanguage, onPick: (AgentLanguage) -> Unit) {
+    val label = LocalStrings.current.language
+    Row(
+        Modifier
+            .border(1.dp, CqColors.Rail, RoundedCornerShape(8.dp))
+            .padding(2.dp)
+            .semantics { contentDescription = label }
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        AgentLanguage.entries.forEach { language ->
+            val picked = language == current
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (picked) CqColors.Raised else Color.Transparent)
+                    .selectable(selected = picked, role = Role.RadioButton, onClick = { onPick(language) })
+                    .size(width = 56.dp, height = 44.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    language.code.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (picked) CqColors.Chalk else CqColors.ChalkDim,
+                )
+            }
         }
     }
 }
@@ -309,7 +380,7 @@ private fun BatteryGauge(level: Int, charging: Boolean) {
             fontWeight = FontWeight.SemiBold,
             color = if (level <= 20) CqColors.Alert else CqColors.Chalk,
         )
-        if (charging) Text("charging", style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+        if (charging) Text(LocalStrings.current.charging, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
     }
 }
 

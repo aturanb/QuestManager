@@ -38,6 +38,8 @@ class AgentService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Re-posted on every start so a language picked in the app reaches the notification.
+        startForegroundService()
         scope.launch {
             when (intent?.action) {
                 ACTION_RECONNECT -> connections.reconnect()
@@ -60,14 +62,16 @@ class AgentService : Service() {
     }
 
     private fun startForegroundService() {
+        val strings = LanguageStore(this).load().strings
         val channelId = "cafequest_agent"
         val nm = getSystemService(NotificationManager::class.java)
+        // Re-creating an existing channel only renames it.
         nm.createNotificationChannel(
-            NotificationChannel(channelId, "CafeQuest agent", NotificationManager.IMPORTANCE_MIN)
+            NotificationChannel(channelId, strings.notificationChannel, NotificationManager.IMPORTANCE_MIN)
         )
         val note = Notification.Builder(this, channelId)
-            .setContentTitle("CafeQuest agent running")
-            .setContentText("Connected to café server")
+            .setContentTitle(strings.notificationTitle)
+            .setContentText(strings.notificationText)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .build()
         startForeground(1, note)

@@ -6,17 +6,25 @@ enum class LinkTone { READY, WAITING, OFFLINE }
 data class LinkStatus(val word: String, val caption: String, val tone: LinkTone)
 
 /** What the headset app says about its connection, in the words staff use at the counter. */
-fun linkStatus(connection: ConnState, serverHost: String?, serverPort: Int?): LinkStatus {
-    val server = if (serverHost.isNullOrBlank()) "the café PC" else "$serverHost:${serverPort ?: 3000}"
+fun linkStatus(
+    connection: ConnState,
+    serverHost: String?,
+    serverPort: Int?,
+    strings: AgentStrings = EnglishStrings,
+): LinkStatus {
+    val server = if (serverHost.isNullOrBlank()) null else "$serverHost:${serverPort ?: 3000}"
     return when (connection) {
-        ConnState.CONNECTED -> LinkStatus("Connected", "The café board can see this headset.", LinkTone.READY)
-        ConnState.CONNECTING -> LinkStatus("Connecting…", "Reaching $server", LinkTone.WAITING)
-        ConnState.DISCONNECTED -> LinkStatus(
-            "Not connected",
-            "Can't reach $server. Check the café Wi-Fi, then tap Reconnect.",
-            LinkTone.OFFLINE,
-        )
+        ConnState.CONNECTED -> LinkStatus(strings.connected, strings.connectedCaption, LinkTone.READY)
+        ConnState.CONNECTING -> LinkStatus(strings.connecting, strings.reaching(server), LinkTone.WAITING)
+        ConnState.DISCONNECTED -> LinkStatus(strings.notConnected, strings.cantReach(server), LinkTone.OFFLINE)
     }
+}
+
+/** The diagnostics' raw result ("SUCCESS", "FAILED <code>", "—") in the app's language; codes stay as sent. */
+fun displayResult(raw: String, strings: AgentStrings): String = when {
+    raw == "SUCCESS" -> strings.success
+    raw.startsWith("FAILED ") -> strings.failed(raw.removePrefix("FAILED "))
+    else -> raw
 }
 
 /** Battery cells lit out of five; a nearly flat battery keeps one so it never reads as unknown. */
