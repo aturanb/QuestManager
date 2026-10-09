@@ -2,6 +2,11 @@ import { z } from "zod";
 
 export const PROTOCOL_VERSION = 1;
 export const LAUNCH_ANDROID_PACKAGE_CAPABILITY = "launch_android_package" as const;
+/** Capability that gates the one-headset live-view feature; older agents omit it. */
+export const SCREEN_CAST_CAPABILITY = "screen_cast_v1" as const;
+/** Signaling bounds keep every relayed frame small; SDP is the largest payload. */
+export const MAX_CAST_SDP_CHARS = 65_536;
+export const MAX_CAST_ICE_CANDIDATE_CHARS = 4_096;
 // Capability negotiation is intentionally open-ended: old servers ignore
 // names they do not understand instead of rejecting a newer protocol-v1 agent.
 export const AgentCapabilitySchema = z.string().min(1).max(64).regex(/^[a-z][a-z0-9_]*$/);
@@ -107,12 +112,143 @@ export const CommandResultSchema = z.object({
   deviceId: z.string().uuid(),
 });
 
+/** Ephemeral state of one live-view session as reported by the headset agent. */
+export const CastSessionStatusSchema = z.enum([
+  "awaiting_approval",
+  "negotiating",
+  "live",
+  "stopped",
+  "failed",
+]);
+
+/** Stable bounded cast failure codes; never exception strings. */
+export const CastFailureCodeSchema = z.enum([
+  "consent_denied",
+  "approval_timeout",
+  "negotiation_timeout",
+  "projection_stopped",
+  "peer_disconnected",
+  "capture_failed",
+  "internal_error",
+]);
+
+/** Why the server told the agent to stop capturing. */
+export const CastStopReasonSchema = z.enum([
+  "viewer_stopped",
+  "viewer_disconnected",
+  "approval_timeout",
+  "negotiation_timeout",
+  "agent_disconnected",
+  "server_stopping",
+  "failed",
+]);
+
+const castSdpSchema = z.string().min(1).max(MAX_CAST_SDP_CHARS);
+const castIceCandidateSchema = z.string().min(1).max(MAX_CAST_ICE_CANDIDATE_CHARS);
+const castIceSignalShape = {
+  kind: z.literal("ice"),
+  candidate: castIceCandidateSchema,
+  sdpMid: z.string().max(64).nullable().optional(),
+  sdpMLineIndex: z.number().int().min(0).max(255).nullable().optional(),
+};
+
+/**
+ * WebRTC signaling union. The agent is always the offerer, so direction is
+ * enforced by the schemas below rather than by the storage shape.
+ */
+export const RtcSignalSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("offer"), sdp: castSdpSchema }),
+  z.object({ kind: z.literal("answer"), sdp: castSdpSchema }),
+  z.object(castIceSignalShape),
+]);
+
+/** Agent → server: the agent offers and trickles its own ICE only. */
+export const AgentRtcSignalSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("offer"), sdp: castSdpSchema }),
+  z.object(castIceSignalShape),
+]);
+
+/** Server/viewer → agent: answers and trickled ICE only; an offer is rejected. */
+export const AnswerRtcSignalSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("answer"), sdp: castSdpSchema }),
+  z.object(castIceSignalShape),
+]);
+
+/** Agent → server live-view status; deviceId preserves the protocol-v1 ownership rule. */
+export const AgentCastStatusSchema = z.object({
+  type: z.literal("cast_status"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  deviceId: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  status: CastSessionStatusSchema,
+  error: CastFailureCodeSchema.optional(),
+});
+
+/** Agent → server signaling (offer/ICE); answered by the browser through the server. */
+export const AgentCastSignalSchema = z.object({
+  type: z.literal("cast_signal"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  deviceId: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  signal: AgentRtcSignalSchema,
+});
+
+/** Server → agent: start capturing for this session before it expires. */
+export const CastRequestSchema = z.object({
+  type: z.literal("cast_request"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  sessionId: z.string().uuid(),
+  expiresAt: z.string().datetime(),
+});
+
+/** Server → agent: one answer or ICE candidate from the bound viewer. */
+export const ServerCastSignalSchema = z.object({
+  type: z.literal("cast_signal"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  sessionId: z.string().uuid(),
+  signal: AnswerRtcSignalSchema,
+});
+
+/** Server → agent: stop capturing this session for a bounded reason. */
+export const CastStopSchema = z.object({
+  type: z.literal("cast_stop"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  sessionId: z.string().uuid(),
+  reason: CastStopReasonSchema,
+});
+
+/** Browser viewer → server: answers and ICE only; the viewer never offers. */
+export const ViewerCastSignalSchema = z.object({
+  type: z.literal("cast_signal"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  sessionId: z.string().uuid(),
+  signal: AnswerRtcSignalSchema,
+});
+
+/** Server → browser viewer: session state plus the agent's offer/ICE relay. */
+export const ViewerCastStatusSchema = z.object({
+  type: z.literal("cast_status"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  sessionId: z.string().uuid(),
+  status: CastSessionStatusSchema,
+  error: CastFailureCodeSchema.optional(),
+});
+
+export const ViewerCastOfferSchema = z.object({
+  type: z.literal("cast_signal"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  sessionId: z.string().uuid(),
+  signal: AgentRtcSignalSchema,
+});
+
 export const AgentMessageSchema = z.discriminatedUnion("type", [
   HelloSchema,
   TelemetrySchema,
   InstalledAppsSchema,
   CommandAckSchema,
   CommandResultSchema,
+  AgentCastStatusSchema,
+  AgentCastSignalSchema,
 ]);
 
 export const LaunchPayloadSchema = z
@@ -171,3 +307,17 @@ export type AgentMessage = z.infer<typeof AgentMessageSchema>;
 export type ServerCommand = z.infer<typeof ServerCommandSchema>;
 export type ServerError = z.infer<typeof ServerErrorSchema>;
 export type ExpectedGame = z.infer<typeof ExpectedGameSchema>;
+export type CastSessionStatus = z.infer<typeof CastSessionStatusSchema>;
+export type CastFailureCode = z.infer<typeof CastFailureCodeSchema>;
+export type CastStopReason = z.infer<typeof CastStopReasonSchema>;
+export type RtcSignal = z.infer<typeof RtcSignalSchema>;
+export type AgentCastStatus = z.infer<typeof AgentCastStatusSchema>;
+export type AgentCastSignal = z.infer<typeof AgentCastSignalSchema>;
+export type CastRequest = z.infer<typeof CastRequestSchema>;
+export type ServerCastSignal = z.infer<typeof ServerCastSignalSchema>;
+export type CastStop = z.infer<typeof CastStopSchema>;
+export type ViewerCastSignal = z.infer<typeof ViewerCastSignalSchema>;
+export type ViewerCastStatus = z.infer<typeof ViewerCastStatusSchema>;
+export type ViewerCastOffer = z.infer<typeof ViewerCastOfferSchema>;
+export type ServerCastMessage = CastRequest | ServerCastSignal | CastStop;
+export type CastFrameToViewer = ViewerCastStatus | ViewerCastOffer;

@@ -14,7 +14,7 @@ function device(over: Partial<Device> = {}): Device {
     id: "d1", name: "Quest 01", model: "Quest 3", agentVersion: "0.1.0",
     lastSeenAt: new Date(999_000).toISOString(), batteryLevel: 82, charging: false,
     expectedGame: null, usageAccessGranted: null, foregroundApp: null,
-    online: true, session: null, lastCommand: null, installedApps: [], ...over,
+    online: true, session: null, lastCommand: null, installedApps: [], supportsScreenCast: false, ...over,
   };
 }
 
@@ -441,10 +441,51 @@ describe("DeviceCard in Turkish", () => {
     ["offline, never connected", { device: device({ online: false, lastSeenAt: null, batteryLevel: null, model: null, session: running() }) }],
     ["unlimited", { device: device({ session: { ...running(), endsAt: null } }) }],
     ["free after an unlimited session", { device: device({ session: { ...running(), endsAt: new Date(NOW - 60_000).toISOString(), status: "stopped" } }) }],
+    ["capable headset with a live-view request", { device: device({ supportsScreenCast: true }), onRequestCast: vi.fn() }],
+    ["older agent with no live view", { device: device({ supportsScreenCast: false }) }],
   ])("leaves no English on a Turkish card: %s", (_state, over) => {
     const view = renderTurkish(<DeviceCard {...props(over)} />);
     const remove = screen.queryByRole("button", { name: /panodan kaldır/ });
     if (remove) fireEvent.click(remove);
     expect(englishOn(view.container)).toEqual([]);
+  });
+
+  it("requests a live view from an online capable headset", () => {
+    const p = props({ device: device({ supportsScreenCast: true }), onRequestCast: vi.fn() });
+    render(<DeviceCard {...p} />);
+    const button = screen.getByRole("button", { name: "Request live view of Quest 01" });
+    expect(button).toBeEnabled();
+    expect(button).toHaveTextContent("Request live view");
+    fireEvent.click(button);
+    expect(p.onRequestCast).toHaveBeenCalledWith("d1");
+  });
+
+  it("explains that an offline headset cannot show a live view", () => {
+    render(<DeviceCard {...props({ device: device({ online: false, supportsScreenCast: true }) })} />);
+    const button = screen.getByRole("button", { name: "Live view is unavailable while Quest 01 is offline" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "Headset offline");
+  });
+
+  it("tells staff to update the agent on a headset without screen_cast_v1", () => {
+    render(<DeviceCard {...props({ device: device({ supportsScreenCast: false }) })} />);
+    const button = screen.getByRole("button", { name: "Update the CafeQuest agent on Quest 01 to use live view" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Update agent to view");
+    expect(screen.queryByRole("button", { name: "Request live view of Quest 01" })).not.toBeInTheDocument();
+  });
+
+  it("disables every live-view action while this dashboard owns a cast", () => {
+    render(<DeviceCard {...props({ device: device({ supportsScreenCast: true }), castBusy: true })} />);
+    expect(screen.getByRole("button", { name: "Request live view of Quest 01" })).toBeDisabled();
+    expect(screen.getByRole("group", { name: "Live view for Quest 01" })).toBeInTheDocument();
+  });
+
+  it("speaks Turkish for the live-view action", () => {
+    const p = props({ device: device({ supportsScreenCast: true }), onRequestCast: vi.fn() });
+    renderTurkish(<DeviceCard {...p} />);
+    const button = screen.getByRole("button", { name: "Quest 01 için canlı görüntü iste" });
+    fireEvent.click(button);
+    expect(p.onRequestCast).toHaveBeenCalledWith("d1");
   });
 });

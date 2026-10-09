@@ -1,5 +1,23 @@
 import { ApiError } from "./api";
 import { messages, type Messages } from "./messages";
+import type { CastFailureCode, CastRequestError } from "./types";
+
+/**
+ * Stable cast codes are translated at render time; raw platform error strings
+ * never reach the UI. Unknown REST refusals collapse to REQUEST_FAILED.
+ */
+export function castErrorText(error: CastFailureCode | CastRequestError, t: Messages = messages.en): string {
+  return t.cast.errors[error];
+}
+
+/** Maps an API refusal message to the modal's bounded error vocabulary. */
+export function castRequestError(error: unknown): CastRequestError {
+  if (error instanceof ApiError) {
+    const known: readonly CastRequestError[] = ["DEVICE_NOT_FOUND", "DEVICE_OFFLINE", "CAST_UNSUPPORTED", "CAST_BUSY"];
+    if ((known as readonly string[]).includes(error.message)) return error.message as CastRequestError;
+  }
+  return "REQUEST_FAILED";
+}
 
 // Server error codes, in the words staff need at the counter (messages.tsx).
 // Unknown codes fall through unchanged so nothing is ever hidden.

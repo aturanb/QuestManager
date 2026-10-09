@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Live support view: video-only screen capture, consent asked per session. No audio. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Private sideloaded deployment: inventory is sent only to the configured LAN server. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!-- Private managed deployment; grant once per headset with adb appops. -->
@@ -25,7 +27,7 @@
         </activity>
         <service
             android:name=".AgentService"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="dataSync|mediaProjection"
             android:exported="false" />
     </application>
 </manifest>

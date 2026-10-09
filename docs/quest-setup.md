@@ -71,6 +71,27 @@ The headset's **Meta App ID** initializes CafeQuest with the Meta SDK. It is not
 one of the target-game IDs in `cafequest.config.json`; each game still needs its
 own real Meta App ID there.
 
+## Live support view (screen sharing)
+
+Staff can open one headset's screen on the dashboard (**Request live view** on
+the card) to help a customer. Nothing extra is installed or granted: the feature
+ships in the same APK, and Quest asks for its own capture consent every time.
+
+- On the headset the diagnostics screen shows **Live support view**. When staff
+  request a view, the panel explains the request and offers **Share screen with
+  café staff**; a tap opens Quest's screen-sharing dialog. Approving starts the
+  view; declining (or ignoring the dialog until the request times out) ends it.
+- While a session runs, the panel and the ongoing notification say so, and
+  **Stop sharing** ends it from the headset. Staff can also stop from the
+dashboard, and the view ends by itself if the browser closes, the Wi-Fi drops,
+  or the headset's agent reconnects.
+- Developer Mode is about installing and debugging the APK. It does **not**
+  remove Quest's per-session capture consent, and it is not a way to watch a
+  headset without someone approving on it.
+- The notification switches to *Live-view request waiting* / *Screen sharing
+  with café staff is on* so a headset in a charging bay shows why it is asking
+  for a tap.
+
 ## Diagnostics controls
 
 - **Reconnect** restarts the agent WebSocket connection.
@@ -82,6 +103,16 @@ own real Meta App ID there.
 
 ## Troubleshooting
 
+- **No live view appears after approving**: both devices must be on the same
+  subnet — the media path is direct WebRTC with no relay. Client isolation on
+  the access point, a VPN, or a second subnet blocks it (the dashboard then
+  reports the session ending). The dashboard also needs a browser with WebRTC
+  (the café PC's Edge/Chrome/Firefox all work).
+- **The live view is black**: that app sets `FLAG_SECURE` and refuses capture.
+  Nothing can be changed from CafeQuest's side.
+- ***Request timed out* / Video did not start in time**: nobody approved on
+  the headset, or the two peers could not reach each other. Re-request from the
+  dashboard; a fresh request always asks for consent again.
 - **Quest cannot reach the PC**: same Wi-Fi band (2.4/5 GHz SSID), PC firewall
   must allow inbound TCP 3000 and UDP 3000, no client-isolation on the AP.
 - **Stays on "Searching for server…" or "No server found"**: allow inbound UDP

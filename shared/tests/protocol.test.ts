@@ -8,8 +8,21 @@ import {
   ServerCommandSchema,
   ServerErrorSchema,
   InstalledAppsSchema,
+  AgentCastStatusSchema,
+  AgentCastSignalSchema,
+  CastRequestSchema,
+  ServerCastSignalSchema,
+  CastStopSchema,
+  ViewerCastSignalSchema,
+  ViewerCastOfferSchema,
+  RtcSignalSchema,
+  MAX_CAST_SDP_CHARS,
+  MAX_CAST_ICE_CANDIDATE_CHARS,
+  SCREEN_CAST_CAPABILITY,
 } from "../src/protocol.js";
 import { parseAgentMessage } from "../src/parse.js";
+
+const castSessionId = "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d";
 
 const hello = {
   type: "hello",
@@ -272,4 +285,123 @@ test("installed_apps rejects unsafe package data and oversized inventories", () 
 test("parseAgentMessage: non-object JSON rejected", () => {
   assert.equal(parseAgentMessage("42").ok, false);
   assert.equal(parseAgentMessage("null").ok, false);
+});
+
+// --- Screen cast protocol (screen_cast_v1) ---------------------------------
+
+test("hello accepts screen_cast_v1 beside package launch and still parses without capabilities", () => {
+  const both = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package", SCREEN_CAST_CAPABILITY],
+  });
+  assert.equal(both.success, true);
+  if (both.success) assert.deepEqual(both.data.capabilities, ["launch_android_package", "screen_cast_v1"]);
+  assert.equal(HelloSchema.safeParse(hello).success, true);
+});
+
+test("rtc signals bound SDP and ICE candidates exactly at their caps", () => {
+  assert.equal(RtcSignalSchema.safeParse({ kind: "offer", sdp: "x".repeat(MAX_CAST_SDP_CHARS) }).success, true);
+  assert.equal(RtcSignalSchema.safeParse({ kind: "answer", sdp: "x".repeat(MAX_CAST_SDP_CHARS) }).success, true);
+  assert.equal(RtcSignalSchema.safeParse({ kind: "offer", sdp: "x".repeat(MAX_CAST_SDP_CHARS + 1) }).success, false);
+  const ice = { kind: "ice", candidate: "c".repeat(MAX_CAST_ICE_CANDIDATE_CHARS), sdpMid: "0", sdpMLineIndex: 0 };
+  assert.equal(RtcSignalSchema.safeParse(ice).success, true);
+  assert.equal(
+    RtcSignalSchema.safeParse({ kind: "ice", candidate: "c".repeat(MAX_CAST_ICE_CANDIDATE_CHARS + 1) }).success,
+    false,
+  );
+  assert.equal(RtcSignalSchema.safeParse({ kind: "ice", candidate: "" }).success, false);
+});
+
+test("agent cast frames require deviceId and a UUID sessionId through parseAgentMessage", () => {
+  const status = {
+    type: "cast_status",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    sessionId: castSessionId,
+    status: "awaiting_approval",
+  };
+  const parsedStatus = parseAgentMessage(JSON.stringify(status));
+  assert.equal(parsedStatus.ok, true);
+  if (parsedStatus.ok) assert.equal(parsedStatus.value.type, "cast_status");
+  const { deviceId: _d, ...statusNoId } = status;
+  assert.equal(AgentCastStatusSchema.safeParse(statusNoId).success, false);
+  assert.equal(AgentCastStatusSchema.safeParse({ ...status, sessionId: "not-a-uuid" }).success, false);
+  assert.equal(AgentCastStatusSchema.safeParse({ ...status, status: "reserved" }).success, false);
+  assert.equal(
+    AgentCastStatusSchema.safeParse({ ...status, status: "failed", error: "consent_denied" }).success,
+    true,
+  );
+  assert.equal(AgentCastStatusSchema.safeParse({ ...status, status: "failed", error: "boom: stacktrace" }).success, false);
+
+  const signal = {
+    type: "cast_signal",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    sessionId: castSessionId,
+    signal: { kind: "offer", sdp: "v=0" },
+  };
+  const parsedSignal = parseAgentMessage(JSON.stringify(signal));
+  assert.equal(parsedSignal.ok, true);
+  if (parsedSignal.ok) assert.equal(parsedSignal.value.type, "cast_signal");
+  assert.equal(AgentCastSignalSchema.safeParse({ ...signal, signal: { kind: "answer", sdp: "v=0" } }).success, false);
+  const { deviceId: _d2, ...signalNoId } = signal;
+  assert.equal(AgentCastSignalSchema.safeParse(signalNoId).success, false);
+});
+
+test("server-to-agent cast frames accept only their exact direction and shape", () => {
+  assert.equal(
+    CastRequestSchema.safeParse({
+      type: "cast_request",
+      protocolVersion: 1,
+      sessionId: castSessionId,
+      expiresAt: new Date().toISOString(),
+    }).success,
+    true,
+  );
+  assert.equal(
+    CastRequestSchema.safeParse({ type: "cast_stop", protocolVersion: 1, sessionId: castSessionId, reason: "failed" })
+      .success,
+    false,
+  );
+  assert.equal(
+    ServerCastSignalSchema.safeParse({ type: "cast_signal", protocolVersion: 1, sessionId: castSessionId, signal: { kind: "answer", sdp: "v=0" } })
+      .success,
+    true,
+  );
+  assert.equal(
+    ServerCastSignalSchema.safeParse({ type: "cast_signal", protocolVersion: 1, sessionId: castSessionId, signal: { kind: "offer", sdp: "v=0" } })
+      .success,
+    false,
+  );
+  assert.equal(
+    CastStopSchema.safeParse({ type: "cast_stop", protocolVersion: 1, sessionId: castSessionId, reason: "viewer_stopped" })
+      .success,
+    true,
+  );
+  assert.equal(
+    CastStopSchema.safeParse({ type: "cast_stop", protocolVersion: 1, sessionId: castSessionId, reason: "whatever" })
+      .success,
+    false,
+  );
+});
+
+test("viewer cast signal accepts answer and ICE but rejects an offer", () => {
+  const base = { type: "cast_signal", protocolVersion: 1, sessionId: castSessionId };
+  assert.equal(ViewerCastSignalSchema.safeParse({ ...base, signal: { kind: "answer", sdp: "v=0" } }).success, true);
+  assert.equal(ViewerCastSignalSchema.safeParse({ ...base, signal: { kind: "ice", candidate: "candidate:1 1 udp 1 10.0.0.1 1 typ host" } }).success, true);
+  assert.equal(ViewerCastSignalSchema.safeParse({ ...base, signal: { kind: "offer", sdp: "v=0" } }).success, false);
+  assert.equal(ViewerCastOfferSchema.safeParse({ ...base, signal: { kind: "offer", sdp: "v=0" } }).success, true);
+  assert.equal(ViewerCastOfferSchema.safeParse({ ...base, signal: { kind: "answer", sdp: "v=0" } }).success, false);
+});
+
+test("legacy launch and telemetry messages still parse unchanged", () => {
+  const launch = {
+    type: "command",
+    protocolVersion: 1,
+    commandId: castSessionId,
+    command: "launch_app",
+    payload: { gameId: "beat-saber", gameName: "Beat Saber", metaAppId: "1234" },
+  };
+  assert.equal(ServerCommandSchema.safeParse(launch).success, true);
+  assert.equal(parseAgentMessage(JSON.stringify(telemetry)).ok, true);
 });

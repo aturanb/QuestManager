@@ -71,4 +71,6 @@ class AgentDiagnostics(
 
 object AgentRuntime {
     val diagnostics = AgentDiagnostics()
+    /** Observable cast state; the foreground service owns the controller that writes it. */
+    val casting = CastingStateStore()
 }

@@ -33,8 +33,8 @@ android {
         applicationId = "com.cafequest.agent"
         minSdk = 29
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "DEFAULT_META_APP_ID", javaString(configuredMetaAppId()))
@@ -66,6 +66,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Prebuilt libWebRTC with org.webrtc.ScreenCapturerAndroid for Quest casting.
+    implementation("io.getstream:stream-webrtc-android:1.3.9")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // Meta Horizon Platform SDK (public Maven Central; needs a Dashboard App ID at runtime)

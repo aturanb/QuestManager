@@ -1,10 +1,13 @@
 package com.cafequest.agent
 
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,10 +69,31 @@ val LocalStrings = staticCompositionLocalOf<AgentStrings> { EnglishStrings }
 
 /** Setup (§38) + diagnostics (§37) screens. No secrets are ever logged. */
 class MainActivity : ComponentActivity() {
+    /** The session whose Share screen action opened Quest's dialog; cleared on every result. */
+    private var pendingCastSession: String? = null
+    private lateinit var projectionConsent: ActivityResultLauncher<Intent>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = IdentityStore(this)
         val languages = LanguageStore(this)
+        projectionConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val session = pendingCastSession
+            pendingCastSession = null
+            // A result with no session (or none at all) is a stale dialog: tell nobody.
+            if (session == null) return@registerForActivityResult
+            val data = result.data
+            val approved = result.resultCode == RESULT_OK && data != null
+            val intent = Intent(this, AgentService::class.java)
+                .setAction(if (approved) CastAction.APPROVED else CastAction.DENIED)
+                .putExtra(AgentService.EXTRA_SESSION_ID, session)
+            if (approved) {
+                // The one-use consent result travels straight to the service; never stored.
+                intent.putExtra(AgentService.EXTRA_RESULT_CODE, result.resultCode)
+                intent.putExtra(AgentService.EXTRA_RESULT_DATA, data)
+            }
+            startForegroundService(intent)
+        }
         setContent {
             var language by remember { mutableStateOf(languages.load()) }
             CompositionLocalProvider(LocalStrings provides language.strings) {
@@ -85,6 +109,7 @@ class MainActivity : ComponentActivity() {
                                 startAgentService()
                             },
                             onStartService = { action -> startAgentService(action) },
+                            onShareScreen = { sessionId -> askForProjection(sessionId) },
                         )
                     }
                 }
@@ -97,6 +122,16 @@ class MainActivity : ComponentActivity() {
         if (action != null) intent.action = action
         startForegroundService(intent)
     }
+
+    /**
+     * Developer Mode does not remove Quest's per-session capture consent: the
+     * system dialog is the only way to get a usable MediaProjection result.
+     */
+    private fun askForProjection(sessionId: String) {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        pendingCastSession = sessionId
+        projectionConsent.launch(manager.createScreenCaptureIntent())
+    }
 }
 
 @Composable
@@ -105,6 +140,7 @@ fun Screens(
     language: AgentLanguage,
     onLanguage: (AgentLanguage) -> Unit,
     onStartService: (String?) -> Unit,
+    onShareScreen: (String) -> Unit,
 ) {
     val s = LocalStrings.current
     val scope = rememberCoroutineScope()
@@ -140,6 +176,7 @@ fun Screens(
                     identity = identity,
                     diagnostics = diagnostics,
                     onOpenSetup = { tab = 1 },
+                    onShareScreen = onShareScreen,
                 )
             } else {
                 SetupScreen(
@@ -164,6 +201,7 @@ fun DiagnosticsScreen(
     identity: AgentIdentity?,
     diagnostics: AgentDiagnosticsState,
     onOpenSetup: () -> Unit,
+    onShareScreen: (String) -> Unit,
 ) {
     val s = LocalStrings.current
     val ctx = LocalContext.current
@@ -171,6 +209,13 @@ fun DiagnosticsScreen(
         ctx.startForegroundService(Intent(ctx, AgentService::class.java).setAction(action))
         Unit
     }
+    val sendCast = { action: String, sessionId: String? ->
+        val intent = Intent(ctx, AgentService::class.java).setAction(action)
+        if (sessionId != null) intent.putExtra(AgentService.EXTRA_SESSION_ID, sessionId)
+        ctx.startForegroundService(intent)
+        Unit
+    }
+    val casting = AgentRuntime.casting.state.collectAsState().value
     // The service publishes where it dials (Auto may have moved it); before that, the saved setup.
     val server = diagnostics.server ?: identity?.serverTarget()
     val link = linkStatus(diagnostics.connection, server?.host, server?.port, s)
@@ -205,8 +250,42 @@ fun DiagnosticsScreen(
             }
         }
     }
+    // Only visible while a request, a session, or a failure is on screen. Nothing
+    // about the live view is stored, so this panel is the whole headset-side trace.
+    val liveView: @Composable () -> Unit = {
+        when (casting.phase) {
+            CastingPhase.IDLE -> Unit
+            else -> Panel(rail = castRail(casting.phase)) {
+                Text(s.casting, style = MaterialTheme.typography.headlineSmall)
+                when (casting.phase) {
+                    CastingPhase.AWAITING_APPROVAL -> {
+                        Text(s.castRequestPending, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                        PrimaryAction(
+                            label = s.castShare,
+                            description = s.castShareLabel(identity?.deviceName ?: "CafeQuest"),
+                        ) { casting.sessionId?.let(onShareScreen) }
+                    }
+                    CastingPhase.NEGOTIATING -> {
+                        Text(s.castNegotiating, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                        SecondaryAction(s.castStop) { sendCast(CastAction.STOP, casting.sessionId) }
+                    }
+                    CastingPhase.LIVE -> {
+                        Text(s.castSharing, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                        SecondaryAction(s.castStop) { sendCast(CastAction.STOP, casting.sessionId) }
+                    }
+                    CastingPhase.FAILED -> {
+                        Text(s.castFailedTitle, style = MaterialTheme.typography.titleMedium, color = CqColors.Alert)
+                        Text(s.castFailure(casting.error), style = MaterialTheme.typography.bodyLarge)
+                        Text(s.castFailedHint, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                    }
+                    CastingPhase.IDLE -> Unit
+                }
+            }
+        }
+    }
     val actions: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            liveView()
             PrimaryAction(s.reconnect) { send(AgentService.ACTION_RECONNECT) }
             SecondaryAction(s.sendTestTelemetry) { send(AgentService.ACTION_TELEMETRY) }
             SecondaryAction(s.testAppLaunch) { send(AgentService.ACTION_TEST_LAUNCH) }
@@ -234,6 +313,15 @@ fun DiagnosticsScreen(
             }
         }
     }
+}
+
+/** The panel edge no headset user can miss: waiting is amber, live is green, failure is red. */
+private fun castRail(phase: CastingPhase): Color = when (phase) {
+    CastingPhase.AWAITING_APPROVAL -> CqColors.Live
+    CastingPhase.NEGOTIATING -> CqColors.ChalkDim
+    CastingPhase.LIVE -> CqColors.Ready
+    CastingPhase.FAILED -> CqColors.Alert
+    CastingPhase.IDLE -> CqColors.Rail
 }
 
 @Composable
@@ -456,10 +544,13 @@ private fun BatteryGauge(level: Int, charging: Boolean) {
 }
 
 @Composable
-private fun PrimaryAction(label: String, onClick: () -> Unit) {
+private fun PrimaryAction(label: String, description: String? = null, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(56.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(containerColor = CqColors.Chalk, contentColor = CqColors.Board),
     ) { Text(label, style = MaterialTheme.typography.labelLarge) }

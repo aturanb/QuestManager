@@ -35,6 +35,7 @@ class AgentConnection(
     private val installedAppsProvider: () -> InstalledAppScanResult = { scanInstalledApps(context) },
     private val foregroundAppReader: ForegroundAppReader = AndroidForegroundAppReader(context),
     private val discovery: ServerDiscovery = ServerDiscovery({ wifiBroadcastTargets(context) }),
+    private val casting: CastingController? = null,
 ) : ManagedAgentConnection {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
@@ -57,6 +58,33 @@ class AgentConnection(
     @Volatile private var running = false
     @Volatile private var managedPackages: Set<String> = emptySet()
     private var attempt = 0
+
+    /**
+     * Cast frames go out over whatever socket is live right now. It is one object
+     * per connection, so the controller can tell this socket from a replacement.
+     */
+    private val castTransport = object : CastingTransport {
+        override fun sendStatus(sessionId: String, status: String, error: String?): Boolean = sendFrame(
+            AgentCastStatus.serializer(),
+            AgentCastStatus(deviceId = identity.deviceId, sessionId = sessionId, status = status, error = error),
+        )
+
+        override fun sendSignal(sessionId: String, signal: RtcSignal): Boolean = sendFrame(
+            AgentCastSignal.serializer(),
+            AgentCastSignal(deviceId = identity.deviceId, sessionId = sessionId, signal = signal),
+        )
+    }
+
+    private fun <T> sendFrame(serializer: kotlinx.serialization.SerializationStrategy<T>, frame: T): Boolean {
+        val ws = socket ?: return false
+        return try {
+            ws.send(protocolJson.encodeToString(serializer, frame))
+            true
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "cast frame dropped: ${e.message}")
+            false
+        }
+    }
 
     override fun start() {
         if (running) return
@@ -153,13 +181,20 @@ class AgentConnection(
                         Log.w(LOG_TAG, "installed app report failed: ${error.message}")
                     }
                 }
+                casting?.attachTransport(castTransport)
                 Log.i(LOG_TAG, "connected to $url")
                 if (!opened.complete(ws)) ws.close(1000, "superseded")
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
-                val cmd = parseLaunchCommand(text) ?: return
-                scope.launch { handleLaunch(ws, cmd) }
+                when (val message = parseServerMessage(text)) {
+                    is ParsedServerMessage.Launch -> scope.launch { handleLaunch(ws, message.command) }
+                    is ParsedServerMessage.CastRequest -> casting?.onRequest(message.message)
+                    // Signaling is already serialized by the controller's mutex.
+                    is ParsedServerMessage.CastSignal -> scope.launch { casting?.onSignal(message.message) }
+                    is ParsedServerMessage.CastStop -> casting?.onStop(message.message)
+                    null -> Unit
+                }
             }
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
@@ -176,6 +211,9 @@ class AgentConnection(
             socket = opened.await() // throws on immediate failure
             dead.await() // suspends until the socket dies
         } finally {
+            // This exact socket is gone: stop capture rather than leave the
+            // projection running for a viewer that can no longer be reached.
+            casting?.detachTransport(castTransport)
             diagnostics.setConnection(ConnState.DISCONNECTED)
             if (socket != null) {
                 try { socket?.close(1000, "reconnect") } catch (_: Exception) { }

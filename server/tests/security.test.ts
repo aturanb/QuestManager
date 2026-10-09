@@ -75,12 +75,38 @@ test("the server no longer mentions an enrollment key at boot", () => {
   assert.ok(!logs.text().includes("DEVICE_ENROLLMENT_KEY"), "boot log still mentions DEVICE_ENROLLMENT_KEY");
 });
 
+test("cast REST and the cast websocket require the admin key", async () => {
+  const denied = await fetch(`${lbase}/api/casts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deviceId: randomUUID() }),
+  });
+  assert.equal(denied.status, 401);
+  const withKey = await fetch(`${lbase}/api/casts`, {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/json" },
+    body: JSON.stringify({ deviceId: randomUUID() }),
+  });
+  assert.equal(withKey.status, 404, "authorized but unknown device");
+
+  const closeCode = (ws: WebSocket) => new Promise<number>((r) => ws.on("close", (c) => r(Number(c))));
+  const noKey = new WebSocket(`${lws}/cast-ws?sessionId=${randomUUID()}`);
+  assert.equal(await closeCode(noKey), 4401);
+  const wrongKey = new WebSocket(`${lws}/cast-ws?key=wrong&sessionId=${randomUUID()}`);
+  assert.equal(await closeCode(wrongKey), 4401);
+  const goodKey = new WebSocket(`${lws}/cast-ws?key=${ADMIN}&sessionId=${randomUUID()}`);
+  assert.equal(await closeCode(goodKey), 4404, "authorized but no such reservation");
+});
+
 test("secrets never appear in server logs", async () => {
-  // exercise authed REST + the dashboard websocket, then grep the captured log stream
+  // exercise authed REST, the dashboard websocket, and the cast websocket,
+  // then grep the captured log stream for the key.
   await fetch(`${lbase}/api/devices`, { headers: auth });
   const ws = new WebSocket(`${lws}/dashboard-ws?key=${ADMIN}`);
   await new Promise((r) => ws.on("message", () => r(null)));
   ws.close();
+  const castWs = new WebSocket(`${lws}/cast-ws?key=${ADMIN}&sessionId=${randomUUID()}`);
+  await new Promise((r) => castWs.on("close", () => r(null)));
   assert.ok(!logs.text().includes(ADMIN), "admin key leaked into logs");
 });
 

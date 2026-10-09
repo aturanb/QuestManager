@@ -1,6 +1,9 @@
 package com.cafequest.agent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentStringsTest {
@@ -60,5 +63,59 @@ class AgentStringsTest {
         )
         assertEquals("192.168.1.77:3000 · Manuel", serverSummary(ServerTarget("CAFE-PC", "192.168.1.77", 3000, ServerMode.MANUAL), tr))
         assertEquals("Henüz bulunamadı", serverSummary(ServerTarget(null, "", 3000, ServerMode.AUTO), tr))
+    }
+
+    @Test
+    fun castingCopyExistsInBothLanguages() {
+        AgentLanguage.entries.forEach { language ->
+            val s = language.strings
+            listOf(
+                s.casting,
+                s.castRequestPending,
+                s.castShare,
+                s.castNegotiating,
+                s.castSharing,
+                s.castStop,
+                s.castStopped,
+                s.castFailedTitle,
+                s.castFailedHint,
+                s.notificationAwaiting,
+                s.notificationSharing,
+            ).forEach { assertTrue("${language.code}: blank casting copy", it.isNotBlank()) }
+            CastFailure.ALL.forEach { code ->
+                assertTrue("${language.code}: blank failure copy for $code", s.castFailure(code).isNotBlank())
+            }
+        }
+    }
+
+    @Test
+    fun castFailureCopyIsLocalizedAndNeverLeaksUnknownText() {
+        val en = AgentLanguage.EN.strings
+        val tr = AgentLanguage.TR.strings
+        assertNotEquals(en.castFailure(CastFailure.PEER_DISCONNECTED), tr.castFailure(CastFailure.PEER_DISCONNECTED))
+        // An unknown or absent code gets generic localized copy, never the raw value.
+        assertEquals("Something went wrong.", en.castFailure(null))
+        assertEquals("Bir şeyler ters gitti.", tr.castFailure("SECURITY_EXCEPTION at MediaProjection"))
+    }
+
+    @Test
+    fun theNotificationNamesTheLiveViewState() {
+        val en = AgentLanguage.EN.strings
+        assertEquals(en.notificationAwaiting, notificationText(CastingPhase.AWAITING_APPROVAL, en))
+        assertEquals(en.notificationSharing, notificationText(CastingPhase.NEGOTIATING, en))
+        assertEquals(en.notificationSharing, notificationText(CastingPhase.LIVE, en))
+        assertEquals(en.notificationText, notificationText(CastingPhase.IDLE, en))
+        assertEquals(en.notificationText, notificationText(CastingPhase.FAILED, en))
+        val tr = AgentLanguage.TR.strings
+        assertEquals(tr.notificationAwaiting, notificationText(CastingPhase.AWAITING_APPROVAL, tr))
+        assertEquals(tr.notificationSharing, notificationText(CastingPhase.LIVE, tr))
+    }
+
+    @Test
+    fun turkishCastCopyNeverSuffixesTheDeviceName() {
+        val tr = AgentLanguage.TR.strings
+        assertEquals("Quest 02 ekranını kafe personeliyle paylaş", tr.castShareLabel("Quest 02"))
+        assertEquals("Quest 01 ekranını kafe personeliyle paylaş", tr.castShareLabel("Quest 01"))
+        assertFalse(tr.castShareLabel("Quest 02").startsWith("Quest 02'"))
     }
 }

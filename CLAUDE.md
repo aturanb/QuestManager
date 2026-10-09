@@ -37,6 +37,9 @@ npm run build -w quest-simulator && node --test quest-simulator/dist/quest-simul
 npm test -w dashboard -- src/api.test.ts        # vitest
 node --test server/dist/tests/catalog-refresh.test.js
 node --test server/dist/tests/catalog-routes.test.js
+node --test server/dist/tests/cast-coordinator.test.js
+node --test server/dist/tests/casting-routes.test.js
+npm test -w dashboard -- src/casting.test.ts src/components/LiveViewModal.test.tsx
 ```
 
 Android agent (needs **JDK 21** — Gradle 8.7 rejects the JDK 25 that
@@ -73,15 +76,29 @@ dashboard :5173 (React+Vite)
 server :3000 — Fastify + better-sqlite3
   app.ts    routes, auth hooks, the hello handshake
   hub.ts    live sockets, command lifecycle, 1s sweep, 1s dashboard state push
+  cast-coordinator.ts  the one in-memory live-view session (no SQL, no media)
   discovery.ts  UDP 3000 responder: answers headset probes with name + HTTP port
   catalog-refresh.ts  the one internet fetch, shared by CLI and refresh route
   store.ts  ALL SQL (devices, games, device_apps, sessions, commands)
   db.ts     schema creation + additive idempotent migrations on open
   │ UDP 3000: headset broadcasts a probe, server answers the sender
   │ WS /agent-ws (hello, telemetry, commands; no key)
+  │ WS /cast-ws?key=&sessionId= relays offer/answer/ICE; video is peer-to-peer
   ▼
 agents: quest-simulator (tests/demo, --url) │ quest-agent APK (hardware, finds the server)
 ```
+
+**Live support view** (`screen_cast_v1`): one global session, one viewer, video
+only (960×540 / 15 FPS / 1.5 Mbps), direct LAN WebRTC with an empty ICE-server
+list — no STUN, TURN, SFU, audio, or recording. The server relays signaling and
+keeps nothing: no SDP, ICE, or media in SQLite, files, or logs. MediaProjection
+consent is required per session and Developer Mode does not bypass it, so
+`quest-agent/.../CastingController.kt` owns one request at a time and every stop
+path (viewer close, DELETE, timeout, agent disconnect/replacement, projection
+revocation, app shutdown) is idempotent. Cast messages extend the wire protocol,
+so they too live in `shared/src/protocol.ts`, `quest-agent/.../Protocol.kt`, and
+`dashboard/src/types.ts`; browser signaling sits in `dashboard/src/casting.ts`
+with the native adapter in `browser-rtc.ts`.
 
 Two code paths reach the internet, both via `catalog-refresh.ts`:
 `npm run catalog:update` and `POST /api/catalog/refresh` (the dashboard's

@@ -61,6 +61,35 @@ connect**.
 | 18 | PC IP change: stop the server, give the PC a new IP (switch Wi-Fi ↔ Ethernet, or renew its DHCP lease), start the server. Every Auto headset is back `Online` within ~35 s with nobody touching it, and the server log shows `discovery probe answered` | |
 | 19 | Set one headset to **Manual** with the PC's IP → **Save and connect**, then restart the server: the headset reconnects to the same IP and never shows `Searching for server…` | |
 
+## Live support view (screen_cast_v1)
+
+Needs a managed game in the foreground, one headset, and the dashboard open on
+the café PC. Use a stopwatch for the timed rows and record real numbers in
+`docs/poc-test-results.md`.
+
+| # | Check | PASS / FAIL |
+|---|---|---|
+| 20 | Card offers **Request live view**; press it while the headset is Online and its CafeQuest panel shows **Live support view** with **Share screen with café staff** | |
+| 21 | Tap **Share screen with café staff** → Quest's own screen-sharing dialog appears (not a CafeQuest dialog) | |
+| 22 | Approve: picture appears on the dashboard within 15 s of the approval tap. Record seconds | |
+| 23 | Return to the game: the game stays visible in the view (status stays Live, no black frame) | |
+| 24 | Resolution/orientation: the picture is 960×540-ish, readable for support, and rotates/fits when the headset UI turns | |
+| 25 | Approximate latency (two clocks/camera): below ~2 s end-to-end. Record the range | |
+| 26 | Leave it running 15 min during a game: no disconnect, no `Offline` flash on the card, the game keeps running | |
+| 27 | Battery/thermal: record battery % before/after and whether the headset got hot or the game stuttered | |
+| 28 | Dashboard **Stop live view** → view closes and the headset returns to the ordinary diagnostics panel within ~3 s | |
+| 29 | Headset panel **Stop sharing** → the dashboard shows the session ended; the headset notification stops saying *sharing is on* | |
+| 30 | **Decline** the Quest dialog: the dashboard reports a declined request (no stuck spinner) and the headset panel clears | |
+| 31 | Timing: request a view and tap nothing for ~60 s → the dashboard/headset report the request timing out, the headset shows no share panel, and a fresh request asks for consent again | |
+| 32 | Game capture compatibility: repeat 21–25 with a second and third game (and a 2D panel app). Note any title that shows black (`FLAG_SECURE`) | |
+| 33 | Fresh consent every time: after one completed session, request again → Quest's dialog appears again; a cached/instant start would be a FAIL | |
+| 34 | One stream only: with a session Live, press **Request live view** on another Online headset → refused with `busy`; press it again on the same card → also refused | |
+| 35 | Sleep test: let the headset sleep mid-session → the session ends and the dashboard frees the slot (no ghost viewer) | |
+| 36 | Wi-Fi loss: aircraft-mode the headset mid-session → session ends, card goes Offline, slot is free; restoring Wi-Fi lets a new request succeed | |
+| 37 | Viewer refresh: reload the dashboard mid-session → the session ends server-side (no orphan projection; the headset stops sharing) | |
+| 38 | Duplicate-device replacement: with a session Live, force a second connection for the same device id (restart the agent) → the old session ends and the slot is free | |
+| 39 | App restart: start a session, then force-stop and reopen CafeQuest → projection stops and the dashboard slot frees within seconds | |
+
 ## Troubleshooting
 
 - **ADB empty**: developer mode, USB RSA prompt, cable/port.
@@ -80,5 +109,12 @@ connect**.
   the app is registered with Meta and direct package launch is unsuitable.
 - **Meta login/entitlement prompt**: sign the test Meta account into the
   headset and entitle the game to it.
+- **Live view never starts**: nobody approved on the headset, the two devices are
+  on different subnets/VPN, or the access point blocks peer traffic. The media
+  path has no TURN relay by design (see docs/known-limitations.md).
+- **Live view is black**: the running app sets `FLAG_SECURE` and refuses capture.
+- **`Request live view` refused**: another session is already Live (`busy`), the
+  headset is Offline, or the APK is older than 0.5.0 and does not advertise
+  `screen_cast_v1`.
 
 Record every result in `docs/poc-test-results.md` — never pre-mark PASS.

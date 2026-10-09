@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { buildApp } from "../src/app.js";
 import { upsertDevice, createCommand, getCommand } from "../src/store.js";
 
-const { app, db } = await buildApp({ dbPath: ":memory:", port: 0, host: "127.0.0.1" });
+const { app, db, hub } = await buildApp({ dbPath: ":memory:", port: 0, host: "127.0.0.1" });
 await app.listen({ port: 0, host: "127.0.0.1" });
 const addr = app.server.address();
 const port = typeof addr === "object" && addr ? addr.port : 0;
@@ -26,6 +26,14 @@ async function connect(id: string, name: string): Promise<WebSocket> {
   const ws = new WebSocket(`${wsBase}/agent-ws`);
   await new Promise<void>((r, j) => { ws.on("open", () => r()); ws.on("error", j); });
   ws.send(JSON.stringify(hello(id, name)));
+  await new Promise((r) => setTimeout(r, 150));
+  return ws;
+}
+
+async function connectWithCaps(id: string, name: string, capabilities: string[]): Promise<WebSocket> {
+  const ws = new WebSocket(`${wsBase}/agent-ws`);
+  await new Promise<void>((r, j) => { ws.on("open", () => r()); ws.on("error", j); });
+  ws.send(JSON.stringify({ ...hello(id, name), capabilities }));
   await new Promise((r) => setTimeout(r, 150));
   return ws;
 }
@@ -50,6 +58,31 @@ test("duplicate connection: newest hello wins, old socket is told why and closed
   const rows = db.prepare("SELECT COUNT(*) AS n FROM devices WHERE id = ?").get(ID_A) as any;
   assert.equal(rows.n, 1);
   first.close(); second.close();
+});
+
+test("duplicate hello ends an active cast on the replaced socket and frees the slot", async () => {
+  const first = await connect(ID_A, "Quest A");
+  // A launch-only connection cannot reserve, and nothing was contacted.
+  assert.equal(hub.cast.reserve(ID_A).ok, false);
+
+  const capable = await connectWithCaps(ID_A, "Quest A", ["screen_cast_v1"]);
+  const cast = hub.cast.reserve(ID_A);
+  assert.equal(cast.ok, true);
+  if (!cast.ok) return;
+  const viewer = { messages: [] as any[], closed: [] as any[], send(m: any) { this.messages.push(m); }, close(code: number, reason: string) { this.closed.push({ code, reason }); } };
+  assert.deepEqual(hub.cast.bindViewer(cast.sessionId, viewer), { ok: true });
+
+  // A newer hello replaces the socket; the cast must terminate, not migrate.
+  const replacement = await connectWithCaps(ID_A, "Quest A", ["screen_cast_v1"]);
+  assert.equal(hub.cast.active, null, "the replaced socket cannot keep a cast");
+  assert.equal(viewer.closed.length, 1, "the bound viewer is closed exactly once");
+  const again = hub.cast.reserve(ID_A);
+  assert.equal(again.ok, true, "a new reservation succeeds on the replacement connection");
+  if (again.ok) hub.cast.stop(again.sessionId);
+  assert.equal(hub.cast.active, null);
+  replacement.close();
+  capable.close();
+  first.close();
 });
 
 test("ack for an unknown commandId yields UNKNOWN_COMMAND and changes nothing", async () => {

@@ -303,6 +303,44 @@ input::placeholder { color: var(--chalk-dim); }
 .confirm p { font-size: 0.875rem; }
 .confirm .btn { flex: 1 1 0; }
 
+/* ---- live view -------------------------------------------------------------- */
+.controls.live-view { margin-top: 2px; }
+.controls.live-view .btn { flex: 1 1 0; }
+
+.cast-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: var(--gutter);
+  background: rgba(6, 10, 15, 0.78);
+}
+.cast-modal {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 720px);
+  max-height: calc(100vh - 2 * var(--gutter));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-bay);
+  background: var(--bay);
+}
+.cast-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.cast-head h2 { font-size: 1.15rem; font-weight: 650; overflow-wrap: anywhere; }
+.cast-phase { display: flex; align-items: center; gap: 7px; font-size: 0.875rem; color: var(--chalk-dim); white-space: nowrap; }
+.cast-phase::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+.cast-phase[data-phase="live"] { color: var(--chalk); }
+.cast-phase[data-phase="live"]::before { background: var(--alert); }
+.cast-phase[data-phase="failed"] { color: var(--alert); }
+.cast-phase[data-phase="failed"]::before { background: var(--alert); }
+.cast-body { color: var(--chalk-dim); }
+.cast-video { position: relative; aspect-ratio: 16 / 9; border: 1px solid var(--rail); border-radius: var(--r-ctl); background: #000; overflow: hidden; }
+.cast-video video { width: 100%; height: 100%; object-fit: contain; }
+.cast-video .note { position: absolute; inset: auto 10px 10px 10px; margin: 0; }
+.cast-controls { justify-content: flex-end; }
+
 /* ---- page states ------------------------------------------------------------ */
 .banner {
   display: flex;

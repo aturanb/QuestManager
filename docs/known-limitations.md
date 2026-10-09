@@ -76,6 +76,39 @@
   headset accepts only the PC name it remembers, so after a rename staff press
   **Find server** once per headset. On a fresh install with two servers
   answering (say, a laptop running `npm run dev`), the first answer wins.
+- **The live support view is one video-only stream**: no audio, no recording,
+  no screenshots, no second viewer and no streaming to two headsets at once.
+  A second reservation is refused with `CAST_BUSY` until the active session
+  ends, and one headset can never serve two viewers.
+- **No reconnect for a cast**: if the browser reloads or the headset's socket
+  drops, the session ends and the viewer must reserve again; there is no resume.
+  The dashboard keeps the `sessionId` in memory, so a page refresh also loses a
+  session that is still reserved (the slot frees itself at the approval or
+  negotiation timeout).
+- **No TURN and no STUN**: peers connect with host candidates only, so this
+  works on one flat café LAN. A cast across subnets, through a VPN, or with
+  client isolation on the access point will not connect — and there is no
+  fallback relay by design.
+- **Consent is per session, and Developer Mode does not remove it**: every new
+  request needs a fresh tap on Quest's own `MediaProjection` dialog. A headset
+  that nobody is wearing cannot be watched without someone approving on it, and
+  CafeQuest never fakes or remembers an approval.
+- **Some apps opt out of capture**: any game or app that sets
+  `FLAG_SECURE`/`setSecure` renders black in the support view. CafeQuest asks
+  the platform for the screen, so whether a given title is watchable is the
+  title's decision, not a setting here. Representative games are UNVERIFIED on
+  hardware (docs/morning-test.md row 32).
+- **The projection foreground service type is ordered optimistically**: the
+  agent requests `dataSync|mediaProjection` just before handing the one-use
+  consent result over, and falls back to `dataSync` if the platform refuses the
+  type. On Android 14 that transition happens before the projection exists, so a
+  refused promotion is possible; the capture path then reports
+  `capture_failed` to the dashboard instead of silently showing nothing.
+  UNVERIFIED_HARDWARE.
+- **Video quality, latency and thermal behavior are unmeasured**: the profile is
+  960×540 / 15 FPS / 1.5 Mbps on paper. Picture-within-15s, sub-2s latency, a
+  stable 15-minute session, and the battery/thermal impact on a running game are
+  all NOT TESTED (docs/morning-test.md rows 21–33).
 - **The server's name is the PC's hostname**: a Mac without a fixed `HostName`
   takes its name from the router, and that name can change along with the IP,
   after which Auto headsets stop accepting the server. Fix a Mac's name once

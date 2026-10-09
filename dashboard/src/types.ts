@@ -28,6 +28,26 @@ export type Device = {
   session: SessionInfo | null;
   lastCommand: CommandInfo | null;
   installedApps: InstalledApp[];
+  /** Live connection capability (screen_cast_v1); false offline or for older agents. */
+  supportsScreenCast: boolean;
 };
 export type Game = { id: string; name: string; metaAppId: string; enabled: number | boolean };
 export type Snapshot = { serverTime: string; devices: Device[] };
+
+/** Live-view states relayed on /cast-ws (mirrors the shared protocol enums). */
+export type CastSessionStatus = "awaiting_approval" | "negotiating" | "live" | "stopped" | "failed";
+export type CastFailureCode =
+  | "consent_denied"
+  | "approval_timeout"
+  | "negotiation_timeout"
+  | "projection_stopped"
+  | "peer_disconnected"
+  | "capture_failed"
+  | "internal_error";
+/** Stable REST refusals that can end a request before any headset is contacted. */
+export type CastRequestError =
+  | "DEVICE_NOT_FOUND"
+  | "DEVICE_OFFLINE"
+  | "CAST_UNSUPPORTED"
+  | "CAST_BUSY"
+  | "REQUEST_FAILED";

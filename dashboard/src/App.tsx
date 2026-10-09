@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, Game, Snapshot } from "./types";
 import {
   ApiError,
+  castSocketUrl,
   connectStateSocket,
   deleteDevice,
   extendSession,
@@ -12,16 +13,20 @@ import {
   launchInstalledApp,
   mapInstalledApp,
   refreshCatalog,
+  requestCast,
   startSession,
+  stopCast,
   stopSession,
 } from "./api";
+import { CastClient, type CastClientOptions, type CastViewState } from "./casting";
 import { BoardSummary } from "./components/BoardSummary";
 import { CatalogButton } from "./components/CatalogButton";
 import { DeviceCard } from "./components/DeviceCard";
 import { KeyPrompt } from "./components/KeyPrompt";
 import { LangToggle } from "./components/LangToggle";
+import { LiveViewModal } from "./components/LiveViewModal";
 import { SelectionBar } from "./components/SelectionBar";
-import { friendlyError } from "./errors";
+import { castRequestError, friendlyError } from "./errors";
 import { useI18n } from "./i18n";
 
 const KEY_STORAGE = "cq-admin-key";
@@ -30,7 +35,20 @@ type BulkResult =
   | { originDeviceId: string; action: "session"; succeeded: number; failed: number }
   | { originDeviceId: string; action: "launch"; gameName: string; succeeded: number; failed: number };
 
-export function App() {
+/** The one local live-view flow: selected headset, view state, and remote stream. */
+type ActiveLiveView = {
+  deviceId: string;
+  deviceName: string;
+  state: CastViewState;
+  stream: MediaStream | null;
+};
+
+export type AppProps = {
+  /** Injected in tests; defaults to the real signaling/WebRTC client. */
+  castFactory?: (options: CastClientOptions) => CastClient;
+};
+
+export function App({ castFactory }: AppProps = {}) {
   const { t } = useI18n();
   const [key, setKey] = useState(() => localStorage.getItem(KEY_STORAGE) ?? "");
   const [keyRequired, setKeyRequired] = useState(false);
@@ -52,6 +70,13 @@ export function App() {
   const wsRef = useRef<{ close: () => void } | null>(null);
   const keyRef = useRef(key);
   keyRef.current = key;
+  const [liveView, setLiveView] = useState<ActiveLiveView | null>(null);
+  const castClientRef = useRef<CastClient | null>(null);
+  /** Set synchronously on request so a double-click cannot reserve twice. */
+  const castActiveRef = useRef(false);
+  /** Bumped on close/unmount so a late reservation or callback cannot revive a dead flow. */
+  const castGenerationRef = useRef(0);
+  const makeCastClient = castFactory ?? ((options: CastClientOptions) => new CastClient(options));
 
   const applySnapshot = useCallback((snap: Snapshot) => {
     setDevices(snap.devices);
@@ -130,6 +155,84 @@ export function App() {
       wsRef.current?.close();
     };
   }, [key, applySnapshot, demandKey]);
+
+  const closeLiveView = useCallback(() => {
+    castGenerationRef.current += 1;
+    castActiveRef.current = false;
+    const client = castClientRef.current;
+    castClientRef.current = null;
+    if (client) void client.close();
+    setLiveView(null);
+  }, []);
+
+  // The modal opens before the POST resolves; a closed modal still releases the slot.
+  const startLiveView = useCallback(
+    async (device: Device) => {
+      if (castActiveRef.current) return;
+      castActiveRef.current = true;
+      const generation = ++castGenerationRef.current;
+      setLiveView({ deviceId: device.id, deviceName: device.name, state: { phase: "connecting" }, stream: null });
+      let reservation: { sessionId: string };
+      try {
+        reservation = await requestCast(keyRef.current, device.id);
+      } catch (error) {
+        if (castGenerationRef.current !== generation) return;
+        setLiveView((current) =>
+          current ? { ...current, state: { phase: "failed", error: castRequestError(error) } } : current
+        );
+        return;
+      }
+      if (castGenerationRef.current !== generation) {
+        // The viewer closed while the reservation was in flight: free the slot.
+        void stopCast(keyRef.current, reservation.sessionId).catch(() => undefined);
+        return;
+      }
+      const sessionId = reservation.sessionId;
+      const client = makeCastClient({
+        sessionId,
+        socketUrl: castSocketUrl(keyRef.current, sessionId),
+        callbacks: {
+          onState: (state) => {
+            if (castGenerationRef.current !== generation) return;
+            setLiveView((current) => (current ? { ...current, state } : current));
+          },
+          onStream: (stream) => {
+            if (castGenerationRef.current !== generation) return;
+            setLiveView((current) => (current ? { ...current, stream } : current));
+          },
+          onUnauthorized: () => {
+            if (castGenerationRef.current !== generation) return;
+            closeLiveView();
+            demandKey();
+          },
+        },
+        stopSession: () => stopCast(keyRef.current, sessionId),
+      });
+      castClientRef.current = client;
+      client.start();
+    },
+    [closeLiveView, demandKey, makeCastClient]
+  );
+
+  const retryLiveView = useCallback(() => {
+    const current = liveView;
+    if (!current) return;
+    const device = devices.find((d) => d.id === current.deviceId);
+    closeLiveView();
+    if (device) void startLiveView(device);
+  }, [devices, liveView, closeLiveView, startLiveView]);
+
+  // Unmounting the board ends any capture this tab owns.
+  useEffect(
+    () => () => {
+      castGenerationRef.current += 1;
+      castActiveRef.current = false;
+      const client = castClientRef.current;
+      castClientRef.current = null;
+      if (client) void client.close();
+    },
+    []
+  );
 
   async function runCardAction(deviceId: string, fn: () => Promise<{ commandId?: string } | unknown>) {
     setBulkResult(null);
@@ -358,6 +461,11 @@ export function App() {
             onExtend={(sessionId, minutes) => runCardAction(d.id, () => extendSession(key, sessionId, minutes))}
             onStop={(sessionId) => runCardAction(d.id, () => stopSession(key, sessionId))}
             onRemove={removeDevice}
+            castBusy={liveView !== null}
+            onRequestCast={(deviceId) => {
+              const target = devices.find((device) => device.id === deviceId);
+              if (target) void startLiveView(target);
+            }}
           />
         ))}
       </section>
@@ -379,6 +487,16 @@ export function App() {
           onRefresh={runCatalogRefresh}
         />
       </footer>
+      {liveView && (
+        <LiveViewModal
+          deviceName={liveView.deviceName}
+          state={liveView.state}
+          stream={liveView.stream}
+          onStop={closeLiveView}
+          onRetry={retryLiveView}
+          onClose={closeLiveView}
+        />
+      )}
     </>
   );
 }

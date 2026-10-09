@@ -10,7 +10,7 @@ function device(id: string, over: Partial<Device> = {}): Device {
     id, name: `Quest ${id}`, model: "Quest 3", agentVersion: "0.2.0",
     lastSeenAt: null, batteryLevel: null, charging: null, expectedGame: null,
     usageAccessGranted: null, foregroundApp: null, online: true, session: null,
-    lastCommand: null, installedApps: [], ...over,
+    lastCommand: null, installedApps: [], supportsScreenCast: false, ...over,
   };
 }
 

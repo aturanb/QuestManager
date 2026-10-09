@@ -23,6 +23,7 @@ function device(status: "active" | "expired" | null, online = true): Device {
     installedApps: [],
     usageAccessGranted: null,
     foregroundApp: null,
+    supportsScreenCast: false,
   };
 }
 

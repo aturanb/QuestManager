@@ -21,8 +21,9 @@ import {
   activeSessionForDevice,
   sweepExpiredSessions,
 } from "./store.js";
-import { Hub, AGENT_WS_PATH, DASHBOARD_WS_PATH } from "./hub.js";
-import { HelloSchema } from "@cafequest/shared";
+import { Hub, AGENT_WS_PATH, CAST_WS_PATH, DASHBOARD_WS_PATH } from "./hub.js";
+import type { CastViewer } from "./cast-coordinator.js";
+import { HelloSchema, ViewerCastSignalSchema } from "@cafequest/shared";
 import { z } from "zod";
 import { DEFAULT_GAMES, isPlaceholderAppId, seedConfiguredGames, type ConfigGame } from "./config.js";
 import { isAdminAuthorized, isDashboardSocketAuthorized, type AuthConfig } from "./auth.js";
@@ -30,6 +31,9 @@ import { defaultCatalogPath, loadAppCatalog } from "./catalog.js";
 import { CATALOG_SOURCE_URL, catalogFetchedAt, refreshAppCatalog } from "./catalog-refresh.js";
 import { manualGameId, resolveInstalledApp } from "./installed-apps.js";
 import { serverDisplayName, startDiscoveryResponder } from "./discovery.js";
+
+/** Viewer signaling frames are tiny; anything larger is rejected as malformed. */
+const CAST_WS_MAX_FRAME_BYTES = 70 * 1024;
 
 export type AppConfig = {
   dbPath: string;
@@ -163,6 +167,70 @@ export async function buildApp(cfg: AppConfig) {
     hub.addDashboardSocket(socket);
     socket.on("close", () => hub.removeDashboardSocket(socket));
     socket.on("error", () => hub.removeDashboardSocket(socket));
+  });
+
+  // --- live-view websocket: the single viewer bound to a reserved cast --------
+  // Signaling only. The server never receives or stores media; one unguessable
+  // session id plus the admin key authorizes exactly one viewer.
+  app.get(CAST_WS_PATH, { websocket: true }, (socket: WebSocket, req) => {
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    if (!isDashboardSocketAuthorized(auth, query.key)) {
+      socket.close(4401, "unauthorized");
+      return;
+    }
+    const sessionId = typeof query.sessionId === "string" ? query.sessionId : "";
+    if (!z.string().uuid().safeParse(sessionId).success) {
+      socket.close(4400, "invalid-session-id");
+      return;
+    }
+    const viewer: CastViewer = {
+      send: (message) => {
+        try {
+          socket.send(JSON.stringify(message));
+        } catch {
+          /* already closed; the close handler frees the slot */
+        }
+      },
+      close: (code, reason) => {
+        try {
+          socket.close(code, reason);
+        } catch {
+          /* already gone */
+        }
+      },
+    };
+    const bound = hub.cast.bindViewer(sessionId, viewer);
+    if (!bound.ok) {
+      socket.close(bound.error === "CAST_SESSION_ALREADY_BOUND" ? 4409 : 4404, bound.error);
+      return;
+    }
+    socket.on("message", (raw: unknown) => {
+      if (typeof raw !== "string" && !Buffer.isBuffer(raw)) {
+        socket.close(4400, "binary-not-supported");
+        return;
+      }
+      const text = typeof raw === "string" ? raw : (raw as Buffer).toString("utf8");
+      if (Buffer.byteLength(text, "utf8") > CAST_WS_MAX_FRAME_BYTES) {
+        socket.close(4400, "oversized-frame");
+        return;
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        socket.close(4400, "malformed-frame");
+        return;
+      }
+      // Only answers and ICE candidates; an offer from a viewer is malformed here.
+      const parsed = ViewerCastSignalSchema.safeParse(json);
+      if (!parsed.success) {
+        socket.close(4400, "invalid-signal");
+        return;
+      }
+      hub.cast.handleViewerSignal(viewer, parsed.data);
+    });
+    socket.on("close", () => hub.cast.stop(sessionId, viewer, "viewer_disconnected"));
+    socket.on("error", () => hub.cast.stop(sessionId, viewer, "viewer_disconnected"));
   });
 
   // --- REST: devices (enriched snapshot shape: online, expectedGame, session) ----
@@ -341,6 +409,27 @@ export async function buildApp(cfg: AppConfig) {
     sweepExpiredSessions(db);
     const rows = db.prepare("SELECT * FROM sessions ORDER BY started_at DESC LIMIT 200").all();
     return { sessions: rows };
+  });
+
+  // --- REST: live view sessions ---------------------------------------------------
+  // POST reserves the single global slot but does not contact the headset; the
+  // agent is asked only once a viewer binds /cast-ws, which removes the race.
+  app.post("/api/casts", async (req, reply) => {
+    const body = z.object({ deviceId: z.string().uuid() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_cast_body" });
+    if (!getDevice(db, body.data.deviceId)) return reply.code(404).send({ error: "DEVICE_NOT_FOUND" });
+    const result = hub.cast.reserve(body.data.deviceId);
+    if (!result.ok) return reply.code(409).send({ error: result.error });
+    return reply.code(201).send({ sessionId: result.sessionId, status: result.status });
+  });
+
+  // Idempotent cleanup for any dashboard holding the admin key: an active,
+  // terminal, or foreign session all answer 204 so retries never fail.
+  app.delete("/api/casts/:sessionId", async (req, reply) => {
+    const params = z.object({ sessionId: z.string().uuid() }).safeParse(req.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_session_id" });
+    hub.cast.stop(params.data.sessionId);
+    return reply.code(204).send();
   });
 
   // --- REST: health ---------------------------------------------------------------

@@ -5,10 +5,12 @@
 ```text
 Browser (dashboard :5173, React+Vite)
   │  REST /api/* (Bearer ADMIN_API_KEY) + WS /dashboard-ws?key=
+  │  WS /cast-ws?key=&sessionId=  signaling only; media is peer-to-peer
   ▼
 Server :3000 (Fastify + better-sqlite3, server/src)
   │  app.ts       HTTP + WS routes, auth gate, hello handshake
   │  hub.ts       live sockets, command lifecycle, sweeps, snapshots
+  │  cast-coordinator.ts  one in-memory live-view session, timeouts, routing
   │  store.ts     all SQL (devices/games/device apps/sessions/commands)
   │  catalog.ts   local package-name to Meta App ID cache + verified fallbacks
   │  config.ts    cafequest.config.json loading + non-clobbering seed
@@ -18,6 +20,10 @@ Server :3000 (Fastify + better-sqlite3, server/src)
   ▼
 Agents: quest-simulator (test) or quest-agent APK (hardware)
 ```
+
+The live support view is the one path where media does **not** traverse the
+server: the browser and the headset exchange WebRTC offer/answer/ICE through it
+and then send video directly over the café LAN.
 
 ## Key semantics
 
@@ -57,6 +63,53 @@ Agents: quest-simulator (test) or quest-agent APK (hardware)
   `agent_update_required` instead of sending a command an older agent cannot
   decode. Physical Quest package launching is `UNVERIFIED_HARDWARE` until
   morning-test row 5a passes.
+
+## Live support view (`screen_cast_v1`)
+
+Staff can watch one headset's screen on the dashboard while they help a customer.
+It is deliberately small: **one stream at a time, one viewer, no audio, no
+recording**.
+
+- **Reservation**: `POST /api/casts {deviceId}` fills the single global slot
+  (409 `CAST_BUSY` while any session is active, 409 `DEVICE_OFFLINE`/
+  `agent_update_required` for a headset that is not connected or is too old to
+  advertise the additive `screen_cast_v1` capability, 404 for an unknown
+  device). The dashboard stores the returned `sessionId` in memory only.
+- **Signaling**: the browser opens `/cast-ws?key=<admin key>&sessionId=<uuid>`
+  with the same admin key as the rest of the dashboard. A second socket for the
+  same session is closed with 4409; unknown/expired sessions 4404, a bad id
+  4400, a missing/wrong key 4401. The server relays `cast_request`,
+  `cast_status`, `cast_signal` (offer/answer/ICE) and `cast_stop` and nothing
+  else: it rejects binary frames (4400) and never receives, decodes or stores
+  media or SDP.
+- **Consent is per session**: Quest's own `MediaProjection` dialog is the only
+  way to obtain a capture grant, and it must be approved again for every new
+  request. The headset shows **Share screen with café staff** first; only that
+  tap opens the system dialog. **Developer Mode is not a bypass** — it helps
+  installing and debugging the APK, and does nothing about capture consent.
+  The one-use result is handed to exactly one publisher and never cached,
+  logged, persisted, or reused.
+- **Media path**: direct peer-to-peer WebRTC with an empty ICE-server list
+  (host candidates on the café LAN). No STUN, no TURN, no SFU, no cloud relay.
+  Both peers are on the same subnet, so host candidates are enough.
+- **Profile**: 960×540, 15 FPS, `maxBitrateBps` 1.5 Mbps, video only. The
+  agent's `AndroidRtcPeer` sets the encoder limits on the sender; there is no
+audio track anywhere in the codebase.
+- **State**: `CastCoordinator` (`server/src/cast-coordinator.ts`) keeps the one
+  session in memory — reservation, viewer binding, approval/negotiation
+  timeouts, and the live state. Nothing about a cast is ever written to SQLite,
+  files, or logs (the log lines carry only lifecycle words and ids).
+- **Cleanup is idempotent** and has one terminal path per cause: viewer closes
+  the tab or presses **Stop**, `DELETE /api/casts/:sessionId`, approval or
+  negotiation timeout, the agent's socket dropping or being replaced by a
+  newer hello, the headset's projection being revoked (system stop) or the
+  person pressing **Stop sharing**, and server shutdown — each frees the slot
+  and, where a peer still exists, stops capture.
+- **Failure is bounded**: statuses are `awaiting_approval | negotiating | live |
+  stopped | failed`, and failures carry a stable code (`consent_denied`,
+  `approval_timeout`, `negotiation_timeout`, `projection_stopped`,
+  `peer_disconnected`, `capture_failed`, `internal_error`). Raw platform or
+  exception text never reaches the wire or the UI.
 
 ## Server discovery
 

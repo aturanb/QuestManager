@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "./App";
+import type { CastClient, CastClientOptions } from "./casting";
 import { LANG_STORAGE, LangProvider } from "./i18n";
 import type { Device, Game } from "./types";
 
@@ -20,6 +21,7 @@ function device(id: string, name: string, over: Partial<Device> = {}): Device {
     session: null,
     lastCommand: null,
     installedApps: [],
+    supportsScreenCast: false,
     ...over,
   };
 }
@@ -88,6 +90,83 @@ function stubBoard(
       }),
     } as MessageEvent<string>),
   });
+}
+
+type FakeCastClient = {
+  options: CastClientOptions;
+  started: number;
+  closed: number;
+};
+
+/** Records the one client per reservation and lets a test drive its callbacks. */
+function fakeCastFactory() {
+  const clients: FakeCastClient[] = [];
+  const factory = (options: CastClientOptions): CastClient => {
+    const client = {
+      options,
+      started: 0,
+      closed: 0,
+      start() {
+        (client as any).started += 1;
+      },
+      close() {
+        (client as any).closed += 1;
+        return Promise.resolve();
+      },
+    };
+    clients.push(client as unknown as FakeCastClient);
+    return client as unknown as CastClient;
+  };
+  return { factory, clients, last: () => clients[clients.length - 1]! };
+}
+
+/**
+ * A board whose reservation POST stays pending until the test resolves it, so
+ * the connecting state and single-reservation rules can be observed.
+ */
+function stubCastBoard(devices: Device[]) {
+  const calls: { path: string; init?: RequestInit }[] = [];
+  let resolveCast: ((res: Response) => void) | null = null;
+  const fetchMock = vi.fn((input: any, init?: RequestInit) => {
+    const path = typeof input === "string" ? input : new URL(input.url).pathname;
+    calls.push({ path, init });
+    if (path === "/api/casts" && init?.method === "POST") {
+      return new Promise<Response>((resolve) => {
+        resolveCast = resolve;
+      });
+    }
+    if (path.startsWith("/api/casts/") && init?.method === "DELETE") {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (path === "/api/devices") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ serverTime: new Date().toISOString(), devices }), { status: 200 })
+      );
+    }
+    if (path === "/api/games") return Promise.resolve(new Response(JSON.stringify({ games: [] }), { status: 200 }));
+    if (path === "/api/catalog") {
+      return Promise.resolve(new Response(JSON.stringify({ entries: 0, fetchedAt: null, source: "test" }), { status: 200 }));
+    }
+    return Promise.resolve(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal(
+    "WebSocket",
+    class {
+      onmessage: unknown = null;
+      onclose: unknown = null;
+      close() {}
+    }
+  );
+  return {
+    calls,
+    resolveCast: (body: unknown, status = 201) => {
+      const resolve = resolveCast;
+      resolveCast = null;
+      resolve?.(new Response(JSON.stringify(body), { status }));
+    },
+    castCalls: () => calls.filter((call) => call.path.startsWith("/api/casts")),
+  };
 }
 
 describe("App", () => {
@@ -402,6 +481,128 @@ describe("App", () => {
     expect(within(card).getByText("Başlat ve Oyunu aç işlemleri seçili 1 gözlüğe uygulanır")).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Seçili 1 gözlükte 60 dakikalık seans başlat" })).toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Beat Saber oyununu seçili 1 gözlükte aç" })).toBeInTheDocument();
+  });
+
+  it("opens the live-view modal before the reservation returns and starts one client", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    const cast = fakeCastFactory();
+    render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    const dialog = screen.getByRole("dialog", { name: "Live view of Quest 01" });
+    expect(within(dialog).getByText("Connecting…")).toBeInTheDocument();
+    expect(board.castCalls()).toHaveLength(1);
+
+    await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(1));
+    expect(cast.last().options.sessionId).toBe("s1");
+    expect(cast.last().options.socketUrl).toContain("sessionId=s1");
+    expect(cast.last().started).toBe(1);
+  });
+
+  it("a double-click cannot reserve two sessions", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    const cast = fakeCastFactory();
+    render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+
+    const button = await screen.findByRole("button", { name: "Request live view of Quest 01" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(board.castCalls()).toHaveLength(1);
+    await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(1));
+  });
+
+  it("words a busy live view from the server", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    render(<App castFactory={fakeCastFactory().factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    await act(async () => board.resolveCast({ error: "CAST_BUSY" }, 409));
+    expect(await screen.findByText("Another live view is already running. Stop it first.")).toBeInTheDocument();
+    expect(screen.queryByText("CAST_BUSY")).not.toBeInTheDocument();
+  });
+
+  it("words a consent denial from the headset", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    const cast = fakeCastFactory();
+    render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(1));
+    act(() => cast.last().options.callbacks.onState({ phase: "failed", error: "consent_denied" }));
+    expect(await screen.findByText("The customer declined screen sharing.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try the live view of Quest 01 again" })).toBeInTheDocument();
+  });
+
+  it("closing the modal while connecting releases the reservation exactly once", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    render(<App castFactory={fakeCastFactory().factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+    expect(screen.queryByRole("dialog", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+
+    await act(async () => board.resolveCast({ sessionId: "s9", status: "reserved" }));
+    await waitFor(() => {
+      const deletes = board.castCalls().filter((call) => call.init?.method === "DELETE");
+      expect(deletes.map((call) => call.path)).toEqual(["/api/casts/s9"]);
+    });
+  });
+
+  it("retry starts a completely new reservation", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    const cast = fakeCastFactory();
+    render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(1));
+    act(() => cast.last().options.callbacks.onState({ phase: "failed", error: "peer_disconnected" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
+    await act(async () => board.resolveCast({ sessionId: "s2", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(2));
+    expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s1", "s2"]);
+    expect(cast.clients[0]?.closed).toBe(1);
+  });
+
+  it("returns to the key prompt when the cast socket is unauthorized", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    const cast = fakeCastFactory();
+    render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(1));
+    act(() => cast.last().options.callbacks.onUnauthorized());
+
+    expect(await screen.findByRole("dialog", { name: "Enter the admin key" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+  });
+
+  it("unmount stops an active cast exactly once", async () => {
+    const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
+    const cast = fakeCastFactory();
+    const view = render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+    await act(async () => board.resolveCast({ sessionId: "s1", status: "reserved" }));
+    await waitFor(() => expect(cast.clients).toHaveLength(1));
+    view.unmount();
+    expect(cast.last().closed).toBe(1);
+  });
+
+  it("does not offer a live view while the headset is offline or the agent is old", async () => {
+    stubBoard([
+      device("d1", "Quest 01", { online: false, supportsScreenCast: true }),
+      device("d2", "Quest 02", { supportsScreenCast: false }),
+    ]);
+    render(<App castFactory={fakeCastFactory().factory} />, { wrapper: LangProvider });
+
+    expect(await screen.findByRole("button", { name: "Live view is unavailable while Quest 01 is offline" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Update the CafeQuest agent on Quest 02 to use live view" })).toBeDisabled();
   });
 
   it("clears a completed bulk summary when the headset selection changes", async () => {

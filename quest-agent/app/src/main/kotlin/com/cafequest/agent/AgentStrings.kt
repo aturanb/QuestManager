@@ -70,6 +70,23 @@ interface AgentStrings {
     val notificationChannel: String
     val notificationTitle: String
     val notificationText: String
+
+    // Live support view (screen_cast_v1).
+    val casting: String
+    val castRequestPending: String
+    val castShare: String
+    fun castShareLabel(name: String): String
+    val castNegotiating: String
+    val castSharing: String
+    val castStop: String
+    val castStopped: String
+    val castFailedTitle: String
+    /** Stable failure codes are translated here; raw platform errors never reach the screen. */
+    fun castFailure(code: String?): String
+    /** Shown after a failure: only staff can start the next request. */
+    val castFailedHint: String
+    val notificationAwaiting: String
+    val notificationSharing: String
 }
 
 object EnglishStrings : AgentStrings {
@@ -123,6 +140,29 @@ object EnglishStrings : AgentStrings {
     override val notificationChannel = "CafeQuest agent"
     override val notificationTitle = "CafeQuest agent running"
     override val notificationText = "Connected to café server"
+
+    override val casting = "Live support view"
+    override val castRequestPending =
+        "Café staff asked to see this screen. Approve Quest's screen-sharing dialog to start."
+    override val castShare = "Share screen with café staff"
+    override fun castShareLabel(name: String) = "Share the screen of $name with café staff"
+    override val castNegotiating = "Starting the live view…"
+    override val castSharing = "This screen is being shared with café staff."
+    override val castStop = "Stop sharing"
+    override val castStopped = "Sharing stopped"
+    override val castFailedTitle = "Sharing failed"
+    override fun castFailure(code: String?) = when (code) {
+        CastFailure.CONSENT_DENIED -> "Screen sharing was declined."
+        CastFailure.APPROVAL_TIMEOUT -> "The request timed out before it was approved."
+        CastFailure.NEGOTIATION_TIMEOUT -> "Video did not start in time."
+        CastFailure.PROJECTION_STOPPED -> "Screen sharing was stopped."
+        CastFailure.PEER_DISCONNECTED -> "The connection to café staff was lost."
+        CastFailure.CAPTURE_FAILED -> "Screen capture could not start."
+        else -> "Something went wrong."
+    }
+    override val castFailedHint = "Café staff can start a new request; Quest asks for consent again every time."
+    override val notificationAwaiting = "Live-view request waiting — open CafeQuest to approve"
+    override val notificationSharing = "Screen sharing with café staff is on"
 }
 
 // Names and addresses never take a suffix ("Quest 02'yi"): they go before a suffixed noun instead.
@@ -179,4 +219,28 @@ object TurkishStrings : AgentStrings {
     override val notificationChannel = "CafeQuest servisi"
     override val notificationTitle = "CafeQuest çalışıyor"
     override val notificationText = "Kafe sunucusuna bağlı"
+
+    override val casting = "Canlı destek görüntüsü"
+    override val castRequestPending =
+        "Kafe personeli bu ekranı görmek istedi. Başlatmak için Quest ekran paylaşımı penceresini onaylayın."
+    override val castShare = "Ekranı kafe personeliyle paylaş"
+    override fun castShareLabel(name: String) = "$name ekranını kafe personeliyle paylaş"
+    override val castNegotiating = "Canlı görüntü başlatılıyor…"
+    override val castSharing = "Bu ekran kafe personeliyle paylaşılıyor."
+    override val castStop = "Paylaşımı durdur"
+    override val castStopped = "Paylaşım durdu"
+    override val castFailedTitle = "Paylaşım başarısız"
+    override fun castFailure(code: String?) = when (code) {
+        CastFailure.CONSENT_DENIED -> "Ekran paylaşımı reddedildi."
+        CastFailure.APPROVAL_TIMEOUT -> "İstek onaylanmadan zaman aşımına uğradı."
+        CastFailure.NEGOTIATION_TIMEOUT -> "Görüntü zamanında başlamadı."
+        CastFailure.PROJECTION_STOPPED -> "Ekran paylaşımı durduruldu."
+        CastFailure.PEER_DISCONNECTED -> "Kafe personeliyle bağlantı kesildi."
+        CastFailure.CAPTURE_FAILED -> "Ekran yakalama başlatılamadı."
+        else -> "Bir şeyler ters gitti."
+    }
+    override val castFailedHint =
+        "Kafe personeli yeni bir istek başlatabilir; Quest her seferinde onay ister."
+    override val notificationAwaiting = "Canlı görüntü isteği bekliyor — onaylamak için CafeQuest'i açın"
+    override val notificationSharing = "Kafe personeliyle ekran paylaşımı açık"
 }

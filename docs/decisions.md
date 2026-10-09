@@ -206,3 +206,41 @@ stays.
 Reason: CafeQuest runs only on the café's own LAN and is never published, so the
 key protected nothing real while costing a setup field and a way for a headset
 to fail enrollment.
+
+## Live support view: MediaProjection capture plus direct WebRTC
+
+Decision: the one-headset support view (protocol capability `screen_cast_v1`)
+captures the Quest screen with `MediaProjection` + `ScreenCapturerAndroid`
+(`io.getstream:stream-webrtc-android:1.3.9`) and sends it straight to the
+dashboard browser over a direct `RTCPeerConnection` with an **empty ICE-server
+list**. The server relays offer/answer/ICE on `/cast-ws` and tells the agent to
+start or stop; it never receives or stores media, and no SDP or ICE value
+ever reaches its logs or files. Every session needs a fresh Quest consent
+result.
+
+Reason: the media path is the part that cannot scale on a café PC, and a direct
+LAN peer connection keeps the server stateless and cheap (no SFU, no encoding,
+no cloud service, no TURN credentials). Host candidates are enough because the
+headset and the dashboard are on the same subnet. MediaProjection is the only
+API that can capture the whole screen on a Quest, and Android grants it per
+session: caching a grant would mean the café could watch a headset without
+anyone approving, so the dialog stays a hard gate per request. Specs:
+`docs/superpowers/specs/2026-10-09-screen-casting-design.md`,
+`docs/superpowers/plans/2026-10-09-screen-casting.md`.
+
+## Live support view: one global video-only stream
+
+Decision: exactly one cast session exists at a time (`CastCoordinator` keeps it
+in memory: reservation, viewer binding, timeouts, live state), exactly one
+viewer may bind it (second socket → 4409), and the profile is video-only at
+960×540 / 15 FPS / 1.5 Mbps. No audio, recording, screenshots, multi-headset
+streaming, or queueing: a second request while a session is active is refused
+with `CAST_BUSY` (409). Cleanup is one idempotent terminal path shared by
+viewer close, `DELETE`, timeout, agent replacement/disconnect, projection
+revocation and server shutdown.
+
+Reason: the support view exists so staff can help one customer, not to run a
+control room; a single in-memory session cannot leak into SQLite, queues or
+stale state, and a bounded video profile keeps the cost predictable on a share
+of the café's Wi-Fi and the headset's battery. "Busy" is a clearer answer for
+staff than a queue whose owner may already be gone.

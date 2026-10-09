@@ -92,6 +92,22 @@ export function deleteDevice(key: string, deviceId: string): Promise<{ deleted: 
   return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}`, key, { method: "DELETE" });
 }
 
+/** Reserves the single global live-view slot for one headset. */
+export function requestCast(key: string, deviceId: string): Promise<{ sessionId: string; status: string }> {
+  return apiFetch("/api/casts", key, { method: "POST", body: JSON.stringify({ deviceId }) });
+}
+
+/** Idempotent: 204 whether the session is active, terminal, or already gone. */
+export function stopCast(key: string, sessionId: string): Promise<void> {
+  return apiFetch(`/api/casts/${encodeURIComponent(sessionId)}`, key, { method: "DELETE" });
+}
+
+/** The dedicated signaling socket for a reservation; the admin key travels in the query. */
+export function castSocketUrl(key: string, sessionId: string): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/cast-ws?key=${encodeURIComponent(key)}&sessionId=${encodeURIComponent(sessionId)}`;
+}
+
 export type WsState = { socket: WebSocket; close: () => void };
 
 /** Live state channel (/dashboard-ws). Rejects with ApiError(4401) when the key is wrong. */

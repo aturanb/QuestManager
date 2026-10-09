@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ApiError, deleteDevice, getCatalogStatus, getSnapshot, launchGame, launchInstalledApp, mapInstalledApp, refreshCatalog, stopSession } from "./api";
+import { ApiError, castSocketUrl, deleteDevice, getCatalogStatus, getSnapshot, launchGame, launchInstalledApp, mapInstalledApp, refreshCatalog, requestCast, stopCast, stopSession } from "./api";
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({ ok: status < 300, status, json: () => Promise.resolve(body) }) as any;
@@ -93,5 +93,37 @@ describe("api client", () => {
   it("surfaces a refused delete of a connected headset", async () => {
     mockFetch(409, { error: "headset_online", detail: "connected" });
     await expect(deleteDevice("k", "dev-1")).rejects.toMatchObject({ status: 409, message: "headset_online" });
+  });
+
+  it("reserves a live view for one headset", async () => {
+    mockFetch(201, { sessionId: "s-1", status: "reserved" });
+    const res = await requestCast("k", "dev-1");
+    const [url, init] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe("/api/casts");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ deviceId: "dev-1" });
+    expect(init.headers["content-type"]).toBe("application/json");
+    expect(res.sessionId).toBe("s-1");
+  });
+
+  it("surfaces a refused reservation with its stable code", async () => {
+    mockFetch(409, { error: "CAST_BUSY" });
+    await expect(requestCast("k", "dev-1")).rejects.toMatchObject({ status: 409, message: "CAST_BUSY" });
+  });
+
+  it("deletes a cast session with a bodyless request", async () => {
+    mockFetch(204, null);
+    await stopCast("k", "s 1/2");
+    const [url, init] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe("/api/casts/s%201%2F2");
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
+    expect(init.headers["content-type"]).toBeUndefined();
+  });
+
+  it("builds a cast websocket url that encodes only the key and session id", () => {
+    const url = castSocketUrl("a b&c", "s 1");
+    expect(url.startsWith("ws://")).toBe(true);
+    expect(url).toBe(`ws://${location.host}/cast-ws?key=a%20b%26c&sessionId=s%201`);
   });
 });

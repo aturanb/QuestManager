@@ -15,6 +15,9 @@ export type DeviceCardProps = {
   selected?: boolean;
   actionTargetCount?: number;
   actionResult?: string | null;
+  /** True while this dashboard owns a live view; every card's live-view action is disabled. */
+  castBusy?: boolean;
+  onRequestCast?: (deviceId: string) => void;
   onSelectedChange?: (deviceId: string, selected: boolean) => void;
   onLaunch: (deviceId: string, gameId: string) => void;
   onLaunchInstalled: (deviceId: string, packageName: string) => void;
@@ -277,6 +280,28 @@ export function DeviceCard(props: DeviceCardProps) {
         <div><dt>{c.lastLaunched}</dt><dd>{device.expectedGame?.name ?? "—"}</dd></div>
         <div><dt>{c.model}</dt><dd>{device.model ?? "—"}</dd></div>
       </dl>
+
+      {/* Live view: online + capable asks; an older agent is told to update. */}
+      <div className="controls live-view" role="group" aria-label={t.cast.group(device.name)}>
+        {!device.online ? (
+          <button className="btn" aria-label={t.cast.offlineLabel(device.name)} title={c.headsetOffline} disabled>
+            {t.cast.request}
+          </button>
+        ) : device.supportsScreenCast ? (
+          <button
+            className="btn"
+            aria-label={t.cast.requestLabel(device.name)}
+            disabled={props.busy || props.castBusy === true}
+            onClick={() => props.onRequestCast?.(device.id)}
+          >
+            {t.cast.request}
+          </button>
+        ) : (
+          <button className="btn" aria-label={t.cast.updateAgentLabel(device.name)} title={t.cast.updateAgent} disabled>
+            {t.cast.updateAgent}
+          </button>
+        )}
+      </div>
 
       {targetsSelection && <p className="action-scope">{t.bulk.scope(actionTargetCount)}</p>}
 

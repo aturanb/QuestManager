@@ -1,6 +1,6 @@
 # One-headset live support view
 
-Date: 2026-10-09 · Status: approved in conversation, awaiting written review
+Date: 2026-10-09 · Status: approved, ready for implementation
 
 ## Problem
 

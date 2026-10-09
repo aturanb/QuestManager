@@ -17,13 +17,16 @@ import {
 } from "./store.js";
 import {
   LAUNCH_ANDROID_PACKAGE_CAPABILITY,
+  SCREEN_CAST_CAPABILITY,
   parseAgentMessage,
   type AgentCapability,
+  type ServerCastMessage,
   type ServerCommand,
   type ServerError,
 } from "@cafequest/shared";
 import type { AppCatalog } from "./catalog.js";
 import { isIgnoredPackage, resolveInstalledApp } from "./installed-apps.js";
+import { CastCoordinator } from "./cast-coordinator.js";
 
 export const OFFLINE_MS = 15_000;
 export const COMMAND_TIMEOUT_MS = 10_000;
@@ -32,6 +35,7 @@ const DASHBOARD_PUSH_MS = 1_000;
 const AGENT_PING_MS = 5_000;
 export const AGENT_WS_PATH = "/agent-ws";
 export const DASHBOARD_WS_PATH = "/dashboard-ws";
+export const CAST_WS_PATH = "/cast-ws";
 
 type DeviceConn = { socket: WebSocket; deviceId: string; capabilities: ReadonlySet<AgentCapability> };
 type LaunchTarget =
@@ -53,6 +57,8 @@ export class Hub {
   private dashboards = new Set<WebSocket>();
   private timers: NodeJS.Timeout[] = [];
   private log: FastifyInstance["log"];
+  /** The single in-memory live-view session; no SQL, no signaling storage. */
+  readonly cast: CastCoordinator;
 
   constructor(
     private fastify: FastifyInstance,
@@ -62,6 +68,15 @@ export class Hub {
     private onDeviceChanged: () => void = () => {}
   ) {
     this.log = fastify.log;
+    this.cast = new CastCoordinator({
+      agent: {
+        // The DeviceConn object is the connection identity the coordinator binds to.
+        agentConnection: (deviceId) => this.devices.get(deviceId) ?? null,
+        supportsScreenCast: (deviceId) => this.supportsScreenCast(deviceId),
+        sendCastFrame: (deviceId, frame) => this.sendCastFrame(deviceId, frame),
+      },
+      log: this.log,
+    });
   }
 
   start(): void {
@@ -71,6 +86,8 @@ export class Hub {
   }
 
   stop(): void {
+    // Stop the active capture pair before the sockets carrying it close.
+    this.cast.stopAll();
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     for (const c of this.devices.values()) c.socket.close(1001, "server-stopping");
@@ -86,6 +103,8 @@ export class Hub {
   addAgentSocket(deviceId: string, socket: WebSocket, capabilities: readonly AgentCapability[] = []): void {
     const prev = this.devices.get(deviceId);
     if (prev && prev.socket !== socket) {
+      // A replacement connection must never inherit a live view bound to the old socket.
+      this.cast.agentDisconnected(deviceId);
       // Newest hello wins; the stale socket is told why so it stops retrying blindly.
       sendAgentError(prev.socket, "DUPLICATE_DEVICE", "replaced by a newer connection for this device");
       try {
@@ -104,9 +123,27 @@ export class Hub {
     return this.devices.get(deviceId)?.capabilities.has(LAUNCH_ANDROID_PACKAGE_CAPABILITY) ?? false;
   }
 
+  /** True only while a live connection advertises screen_cast_v1; never from SQLite. */
+  supportsScreenCast(deviceId: string): boolean {
+    return this.devices.get(deviceId)?.capabilities.has(SCREEN_CAST_CAPABILITY) ?? false;
+  }
+
+  /** Bounded server → agent cast frame; false when the socket could not take it. */
+  sendCastFrame(deviceId: string, frame: ServerCastMessage): boolean {
+    const conn = this.devices.get(deviceId);
+    if (!conn) return false;
+    try {
+      conn.socket.send(JSON.stringify(frame));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   removeAgentSocket(deviceId: string, socket: WebSocket): void {
     const conn = this.devices.get(deviceId);
     if (conn && conn.socket === socket) {
+      this.cast.agentDisconnected(deviceId);
       this.devices.delete(deviceId);
       this.log.info({ device: deviceId }, "device disconnected");
       this.onDeviceChanged();
@@ -172,6 +209,15 @@ export class Hub {
       this.pushDashboardState();
     } else if (msg.type === "command_ack" || msg.type === "command_result") {
       this.handleCommandMessage(deviceId, socket, msg);
+    } else if (msg.type === "cast_status" || msg.type === "cast_signal") {
+      // Only the socket that currently owns this device may steer its cast.
+      const conn = this.devices.get(deviceId);
+      if (!conn || conn.socket !== socket) {
+        this.log.debug({ device: deviceId }, "ignored cast frame from a replaced socket");
+        return;
+      }
+      if (msg.type === "cast_status") this.cast.handleAgentStatus(deviceId, conn, msg);
+      else this.cast.handleAgentSignal(deviceId, conn, msg);
     } else {
       // hello or anything else: just refresh liveness
       touchDevice(this.db, deviceId, {});
@@ -325,6 +371,7 @@ export class Hub {
             : null,
           lastCommand: lastCommand ? { id: lastCommand.id, status: lastCommand.status, error: lastCommand.error } : null,
           installedApps,
+          supportsScreenCast: this.supportsScreenCast(d.id),
         };
       }),
     };
