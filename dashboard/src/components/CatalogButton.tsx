@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import { formatAgo } from "../time";
 
 export type CatalogButtonProps = {
@@ -24,14 +25,14 @@ export function CatalogButton({
   error,
   onRefresh,
 }: CatalogButtonProps) {
+  const { t } = useI18n();
+  const size = entries === null ? t.catalog.sizeUnknown : t.catalog.appsKnown(entries.toLocaleString(t.locale));
+  const age = fetchedAt ? t.catalog.updated(formatAgo(fetchedAt, now, serverOffsetMs, t.time)) : t.catalog.neverFetched;
   return (
     <div className="catalog">
-      <p className="catalog-status">
-        App list: {entries === null ? "size unknown" : `${entries.toLocaleString("en-US")} apps known`},{" "}
-        {fetchedAt ? `updated ${formatAgo(fetchedAt, now, serverOffsetMs)}` : "never fetched"}
-      </p>
+      <p className="catalog-status">{t.catalog.status(size, age)}</p>
       <button className="btn" type="button" onClick={onRefresh} disabled={busy}>
-        {busy ? "Updating…" : "Update app list"}
+        {busy ? t.catalog.updating : t.catalog.update}
       </button>
       {error && (
         <p className="note" data-tone="bad" role="alert">

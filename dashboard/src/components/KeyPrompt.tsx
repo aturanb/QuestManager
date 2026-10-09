@@ -1,15 +1,18 @@
 import { useState } from "react";
+import { useI18n } from "../i18n";
+import { LangToggle } from "./LangToggle";
 
 export function KeyPrompt({ initial, onSave }: { initial: string; onSave: (key: string) => void }) {
+  const { t } = useI18n();
   const [value, setValue] = useState(initial);
   return (
     <div className="keyprompt" role="dialog" aria-labelledby="keyprompt-title">
-      <p className="brand">CafeQuest</p>
-      <h2 id="keyprompt-title">Enter the admin key</h2>
-      <p>
-        It's <code>ADMIN_API_KEY</code> in the <code>.env</code> file on the café PC. This browser
-        remembers it, so you only enter it once.
-      </p>
+      <div className="keyprompt-head">
+        <p className="brand">CafeQuest</p>
+        <LangToggle />
+      </div>
+      <h2 id="keyprompt-title">{t.keyPrompt.title}</h2>
+      <p>{t.keyPrompt.body(<code>ADMIN_API_KEY</code>, <code>.env</code>)}</p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -18,14 +21,14 @@ export function KeyPrompt({ initial, onSave }: { initial: string; onSave: (key: 
       >
         <input
           type="password"
-          aria-label="Admin key"
+          aria-label={t.keyPrompt.label}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           autoComplete="off"
           autoFocus
         />
         <button className="btn btn-primary" type="submit" disabled={!value.trim()}>
-          Connect
+          {t.keyPrompt.connect}
         </button>
       </form>
     </div>

@@ -1,5 +1,7 @@
 // Server clock is authoritative (§26): remaining = endsAt - serverTime.
 
+import { messages, type Messages } from "./messages";
+
 /** ms between a server timestamp and now, compensating clock skew via offset. */
 export function remainingMs(endsAtIso: string, nowMs: number, serverOffsetMs: number): number {
   return new Date(endsAtIso).getTime() - (nowMs + serverOffsetMs);
@@ -19,13 +21,18 @@ export function formatElapsedSince(startedAtIso: string, nowMs: number, serverOf
   return formatRemaining(elapsed);
 }
 
-/** "4 minutes ago" style relative label for last-seen. */
-export function formatAgo(iso: string | null, nowMs: number, serverOffsetMs: number): string {
-  if (!iso) return "never";
+/** "4 min ago" style relative label for last-seen, in the words of the active language. */
+export function formatAgo(
+  iso: string | null,
+  nowMs: number,
+  serverOffsetMs: number,
+  words: Messages["time"] = messages.en.time
+): string {
+  if (!iso) return words.never;
   const sec = Math.max(0, Math.floor((nowMs + serverOffsetMs - new Date(iso).getTime()) / 1000));
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
+  if (sec < 5) return words.justNow;
+  if (sec < 60) return words.secondsAgo(sec);
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min} min ago`;
-  return `${Math.floor(min / 60)}h ${min % 60}m ago`;
+  if (min < 60) return words.minutesAgo(min);
+  return words.hoursAgo(Math.floor(min / 60), min % 60);
 }

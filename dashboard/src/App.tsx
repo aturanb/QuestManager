@@ -19,24 +19,28 @@ import { BoardSummary } from "./components/BoardSummary";
 import { CatalogButton } from "./components/CatalogButton";
 import { DeviceCard } from "./components/DeviceCard";
 import { KeyPrompt } from "./components/KeyPrompt";
+import { LangToggle } from "./components/LangToggle";
 import { friendlyError } from "./errors";
+import { useI18n } from "./i18n";
 
 const KEY_STORAGE = "cq-admin-key";
 
 export function App() {
+  const { t } = useI18n();
   const [key, setKey] = useState(() => localStorage.getItem(KEY_STORAGE) ?? "");
   const [keyRequired, setKeyRequired] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [games, setGames] = useState<Game[]>([]);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [wsLive, setWsLive] = useState(false);
-  const [globalError, setGlobalError] = useState<string | null>(null);
+  // Errors stay raw until render, so switching language re-words one already on screen.
+  const [globalError, setGlobalError] = useState<unknown>(null);
   const [pending, setPending] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
+  const [cardErrors, setCardErrors] = useState<Record<string, unknown>>({});
   const [catalog, setCatalog] = useState<{ entries: number; fetchedAt: string | null } | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState<unknown>(null);
   const [now, setNow] = useState(() => Date.now());
   const wsRef = useRef<{ close: () => void } | null>(null);
   const keyRef = useRef(key);
@@ -86,7 +90,7 @@ export function App() {
       .then(applySnapshot)
       .catch((e) => {
         if (e instanceof ApiError && e.status === 401) demandKey();
-        else setGlobalError(friendlyError(e));
+        else setGlobalError(e);
       });
     getGames(key)
       .then((g) => setGames(g.games))
@@ -110,7 +114,7 @@ export function App() {
 
   async function runCardAction(deviceId: string, fn: () => Promise<{ commandId?: string } | unknown>) {
     setBusy((b) => ({ ...b, [deviceId]: true }));
-    setCardErrors((e) => ({ ...e, [deviceId]: "" }));
+    setCardErrors((e) => ({ ...e, [deviceId]: null }));
     try {
       const res = (await fn()) as { commandId?: string };
       if (res && typeof res.commandId === "string") {
@@ -121,7 +125,7 @@ export function App() {
         demandKey();
         return;
       }
-      setCardErrors((prev) => ({ ...prev, [deviceId]: friendlyError(e) }));
+      setCardErrors((prev) => ({ ...prev, [deviceId]: e }));
     } finally {
       setBusy((b) => ({ ...b, [deviceId]: false }));
     }
@@ -129,7 +133,7 @@ export function App() {
 
   async function removeDevice(deviceId: string) {
     setBusy((b) => ({ ...b, [deviceId]: true }));
-    setCardErrors((e) => ({ ...e, [deviceId]: "" }));
+    setCardErrors((e) => ({ ...e, [deviceId]: null }));
     try {
       await deleteDevice(key, deviceId);
       // The state push removes it too; dropping it now keeps the board honest if the socket lags.
@@ -139,7 +143,7 @@ export function App() {
         demandKey();
         return;
       }
-      setCardErrors((prev) => ({ ...prev, [deviceId]: friendlyError(e) }));
+      setCardErrors((prev) => ({ ...prev, [deviceId]: e }));
     } finally {
       setBusy((b) => ({ ...b, [deviceId]: false }));
     }
@@ -153,7 +157,7 @@ export function App() {
       setCatalog({ entries: result.entries, fetchedAt: result.fetchedAt });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) demandKey();
-      else setCatalogError(friendlyError(e));
+      else setCatalogError(e);
     } finally {
       setCatalogBusy(false);
     }
@@ -179,18 +183,19 @@ export function App() {
       <header className="topbar">
         <h1 className="brand">CafeQuest</h1>
         <BoardSummary devices={devices} now={now} serverOffsetMs={serverOffsetMs} />
-        <p className="feed" data-live={wsLive}>{wsLive ? "Live" : "Connecting…"}</p>
+        <p className="feed" data-live={wsLive}>{wsLive ? t.app.live : t.app.connecting}</p>
+        <LangToggle />
       </header>
       <main className="shell">
-      {globalError && (
+      {globalError != null && (
         <div className="banner" role="alert">
-          <p>{globalError}</p>
-          <button className="btn" onClick={() => getSnapshot(key).then(applySnapshot).catch((e) => setGlobalError(friendlyError(e)))}>
-            Retry
+          <p>{friendlyError(globalError, t)}</p>
+          <button className="btn" onClick={() => getSnapshot(key).then(applySnapshot).catch(setGlobalError)}>
+            {t.app.retry}
           </button>
         </div>
       )}
-      <section className="board" aria-label="Headsets">
+      <section className="board" aria-label={t.app.headsets}>
         {devices.map((d) => (
           <DeviceCard
             key={d.id}
@@ -200,7 +205,7 @@ export function App() {
             serverOffsetMs={serverOffsetMs}
             pendingCommandId={pending[d.id] ?? null}
             busy={!!busy[d.id]}
-            error={cardErrors[d.id] || null}
+            error={cardErrors[d.id] != null ? friendlyError(cardErrors[d.id], t) : null}
             onLaunch={(deviceId, gameId) => runCardAction(deviceId, () => launchGame(key, deviceId, gameId))}
             onLaunchInstalled={(deviceId, packageName) =>
               runCardAction(deviceId, () => launchInstalledApp(key, deviceId, packageName))
@@ -209,8 +214,10 @@ export function App() {
               runCardAction(deviceId, () => mapInstalledApp(key, deviceId, packageName, name, metaAppId))
             }
             onStartSession={(deviceId, minutes) => {
-              if (!Number.isInteger(minutes) || minutes < 1) {
-                setCardErrors((prev) => ({ ...prev, [deviceId]: "enter 1–1440 minutes" }));
+              // null is the Unlimited button; only a typed length can be wrong.
+              if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1)) {
+                // The very answer the server gives such a length; worded with the other errors.
+                setCardErrors((prev) => ({ ...prev, [deviceId]: new ApiError(400, "invalid session body") }));
                 return Promise.resolve({});
               }
               return runCardAction(deviceId, () => startSession(key, deviceId, minutes));
@@ -221,13 +228,10 @@ export function App() {
           />
         ))}
       </section>
-      {devices.length === 0 && !globalError && (
+      {devices.length === 0 && globalError == null && (
         <section className="empty">
-          <h2>No headsets yet</h2>
-          <p>
-            Open CafeQuest on a headset and it shows up here within a few seconds. To try the board
-            without hardware, run <code>npm run simulator</code> on this PC.
-          </p>
+          <h2>{t.app.emptyTitle}</h2>
+          <p>{t.app.emptyBody(<code>npm run simulator</code>)}</p>
         </section>
       )}
       </main>
@@ -238,7 +242,7 @@ export function App() {
           now={now}
           serverOffsetMs={serverOffsetMs}
           busy={catalogBusy}
-          error={catalogError}
+          error={catalogError != null ? friendlyError(catalogError, t) : null}
           onRefresh={runCatalogRefresh}
         />
       </footer>

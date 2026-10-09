@@ -7,9 +7,10 @@ import { remainingMs } from "./time";
  */
 export type BayState =
   | { kind: "playing" | "ending"; remainingMs: number; totalMs: number }
+  | { kind: "unlimited"; playedMs: number }
   | { kind: "timeup"; endedAt: string }
-  | { kind: "free" }
-  | { kind: "offline" };
+  // playedMs: a stopped unlimited session's length, kept up until the next session.
+  | { kind: "free" | "offline"; playedMs?: number };
 
 export type BayKind = BayState["kind"];
 
@@ -18,7 +19,10 @@ export const ENDING_MS = 5 * 60_000;
 
 export function bayState(device: Device, now: number, serverOffsetMs: number): BayState {
   const session = device.session;
-  if (session) {
+  if (session?.status === "active" && session.endsAt === null) {
+    return { kind: "unlimited", playedMs: now + serverOffsetMs - new Date(session.startedAt).getTime() };
+  }
+  if (session && session.status !== "stopped" && session.endsAt !== null) {
     const left = remainingMs(session.endsAt, now, serverOffsetMs);
     if (session.status === "expired" || left <= 0) return { kind: "timeup", endedAt: session.endsAt };
     if (session.status === "active") {
@@ -28,5 +32,10 @@ export function bayState(device: Device, now: number, serverOffsetMs: number): B
     }
   }
   // The clock outranks connectivity: an offline headset can still be mid-session.
-  return { kind: device.online ? "free" : "offline" };
+  const kind = device.online ? "free" : "offline";
+  // The server only keeps a stopped session on the board when it was unlimited.
+  if (session?.status === "stopped" && session.endsAt !== null) {
+    return { kind, playedMs: new Date(session.endsAt).getTime() - new Date(session.startedAt).getTime() };
+  }
+  return { kind };
 }

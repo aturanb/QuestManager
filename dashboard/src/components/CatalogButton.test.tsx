@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { CatalogButton } from "./CatalogButton";
+import { renderTurkish } from "../test-utils";
 
 const NOW = Date.parse("2026-10-08T12:00:00.000Z");
 
@@ -46,5 +47,19 @@ describe("CatalogButton", () => {
     render(<CatalogButton {...props({ error: "catalog_refresh_failed: HTTP 503" })} />);
     expect(screen.getByRole("alert")).toHaveTextContent("HTTP 503");
     expect(screen.getByText(/18,100 apps/)).toBeInTheDocument();
+  });
+});
+
+describe("CatalogButton in Turkish", () => {
+  it("uses Turkish words and Turkish digit grouping", () => {
+    renderTurkish(<CatalogButton {...props()} />);
+    expect(screen.getByText("Uygulama listesi: 18.100 uygulama biliniyor, 2 sa 0 dk önce güncellendi")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uygulama listesini güncelle" })).toBeEnabled();
+  });
+
+  it("says when the list size and age are unknown", () => {
+    renderTurkish(<CatalogButton {...props({ entries: null, fetchedAt: null, busy: true })} />);
+    expect(screen.getByText("Uygulama listesi: boyutu bilinmiyor, hiç indirilmedi")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Güncelleniyor…" })).toBeDisabled();
   });
 });

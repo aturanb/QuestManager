@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Device, Game, InstalledApp } from "../types";
 import { bayState, type BayState } from "../bay";
+import { useI18n, type Messages } from "../i18n";
 import { formatAgo, formatElapsedSince, formatRemaining } from "../time";
 
 export type DeviceCardProps = {
@@ -14,7 +15,8 @@ export type DeviceCardProps = {
   onLaunch: (deviceId: string, gameId: string) => void;
   onLaunchInstalled: (deviceId: string, packageName: string) => void;
   onMapInstalled: (deviceId: string, packageName: string, name: string, metaAppId: string) => void;
-  onStartSession: (deviceId: string, minutes: number) => void;
+  /** `minutes: null` starts an unlimited session. */
+  onStartSession: (deviceId: string, minutes: number | null) => void;
   onExtend: (sessionId: string, minutes: number) => void;
   onStop: (sessionId: string) => void;
   onRemove: (deviceId: string) => void;
@@ -26,6 +28,7 @@ function UnmatchedAppMapping(props: {
   busy: boolean;
   onMap: DeviceCardProps["onMapInstalled"];
 }) {
+  const { t } = useI18n();
   const [metaAppId, setMetaAppId] = useState("");
   const valid = /^\d{5,32}$/.test(metaAppId);
   return (
@@ -36,44 +39,65 @@ function UnmatchedAppMapping(props: {
       </div>
       <div className="mapping-entry">
         <input
-          aria-label={`Meta App ID for ${props.app.label}`}
-          placeholder="Meta App ID"
+          aria-label={t.card.appIdLabel(props.app.label)}
+          placeholder={t.card.appIdPlaceholder}
           inputMode="numeric"
           value={metaAppId}
           onChange={(event) => setMetaAppId(event.target.value.trim())}
         />
         <button
           className="btn"
-          aria-label={`Save mapping for ${props.app.label}`}
+          aria-label={t.card.saveLabel(props.app.label)}
           disabled={props.busy || !valid}
           onClick={() => props.onMap(props.deviceId, props.app.packageName, props.app.label, metaAppId)}
         >
-          Save
+          {t.card.save}
         </button>
       </div>
     </div>
   );
 }
 
-/** Launch badge derived from the tracked command id + snapshot lastCommand (§21 states). */
-export function launchBadge(pendingCommandId: string | null, device: Device): string | null {
+export type LaunchStatus =
+  | { kind: "launching" }
+  | { kind: "launched" }
+  | { kind: "failed"; error: string | null }
+  | { kind: "timeout" };
+
+/** Launch badge state from the tracked command id + snapshot lastCommand (§21 states). */
+export function launchStatus(pendingCommandId: string | null, device: Device): LaunchStatus | null {
+  const last = device.lastCommand;
   if (!pendingCommandId) {
-    if (device.lastCommand?.status === "failed") return `Failed: ${device.lastCommand.error ?? "unknown error"}`;
-    if (device.lastCommand?.status === "timeout") return "Timed out";
+    if (last?.status === "failed") return { kind: "failed", error: last.error };
+    if (last?.status === "timeout") return { kind: "timeout" };
     return null;
   }
-  const last = device.lastCommand;
-  if (!last || last.id !== pendingCommandId) return "Launching…";
-  if (last.status === "success") return "Launched ✓";
-  if (last.status === "failed") return `Failed: ${last.error ?? "unknown error"}`;
-  if (last.status === "timeout") return "Timed out";
-  return "Launching…";
+  if (!last || last.id !== pendingCommandId) return { kind: "launching" };
+  if (last.status === "success") return { kind: "launched" };
+  if (last.status === "failed") return { kind: "failed", error: last.error };
+  if (last.status === "timeout") return { kind: "timeout" };
+  return { kind: "launching" };
 }
 
-function badgeTone(badge: string): "ok" | "bad" | "wait" {
-  if (badge.startsWith("Launched")) return "ok";
-  if (badge.startsWith("Failed") || badge === "Timed out") return "bad";
-  return "wait";
+// Tone follows the state, never the words, so it survives a language switch.
+const BADGE_TONE: Record<LaunchStatus["kind"], "ok" | "bad" | "wait"> = {
+  launching: "wait",
+  launched: "ok",
+  failed: "bad",
+  timeout: "bad",
+};
+
+function badgeText(status: LaunchStatus, t: Messages["card"]): string {
+  switch (status.kind) {
+    case "launching":
+      return t.launching;
+    case "launched":
+      return t.launched;
+    case "failed":
+      return t.failed(status.error);
+    case "timeout":
+      return t.timedOut;
+  }
 }
 
 /** Mirrors the server's isPlaceholderAppId: launches of these are refused, so they are not offered. */
@@ -84,6 +108,7 @@ function needsAppId(metaAppId: string): boolean {
 type LaunchChoice = { value: string; label: string; disabled: boolean };
 
 function Battery({ level, charging }: { level: number | null; charging: boolean | null }) {
+  const { t } = useI18n();
   if (level === null) return <>—</>;
   const tone = level <= 20 ? "low" : level <= 40 ? "mid" : "ok";
   // A nearly flat headset keeps one red cell: empty would read as "unknown".
@@ -94,34 +119,46 @@ function Battery({ level, charging }: { level: number | null; charging: boolean 
         {[0, 1, 2, 3, 4].map((i) => <i key={i} data-lit={i < lit} />)}
       </span>
       <span className="pct">{level}%</span>
-      {charging && <span className="charging">charging</span>}
+      {charging && <span className="charging">{t.card.charging}</span>}
     </span>
   );
 }
 
 function Readout({ state, now, serverOffsetMs }: { state: BayState; now: number; serverOffsetMs: number }) {
+  const { t } = useI18n();
   if (state.kind === "playing" || state.kind === "ending") {
     const fraction = state.totalMs > 0 ? Math.min(1, Math.max(0, state.remainingMs / state.totalMs)) : 1;
     const clock = formatRemaining(state.remainingMs);
     return (
       <div className="readout">
-        <p className="clock" role="timer" aria-label={`${clock} remaining`}>{clock}</p>
+        <p className="clock" role="timer" aria-label={t.card.remaining(clock)}>{clock}</p>
         <div className="meter" aria-hidden="true">
           <span style={{ width: `${fraction * 100}%` }} />
         </div>
-        {state.totalMs > 0 && <p className="caption">left of {Math.round(state.totalMs / 60_000)} min</p>}
+        {state.totalMs > 0 && <p className="caption">{t.card.leftOf(Math.round(state.totalMs / 60_000))}</p>}
+      </div>
+    );
+  }
+  if (state.kind === "unlimited") {
+    const clock = formatRemaining(state.playedMs);
+    return (
+      <div className="readout">
+        <p className="clock" role="timer" aria-label={t.card.played(clock)}>{clock}</p>
+        <p className="caption">{t.card.unlimitedCaption}</p>
       </div>
     );
   }
   const [word, caption] =
     state.kind === "timeup"
-      ? ["Time up", `Ended ${formatAgo(state.endedAt, now, serverOffsetMs)}`]
+      ? [t.card.timeUp, t.card.ended(formatAgo(state.endedAt, now, serverOffsetMs, t.time))]
       : state.kind === "free"
-        ? ["Free", "Ready for the next player"]
-        : ["Offline", "Check it's switched on and on the café Wi-Fi"];
+        ? [t.card.free, t.card.freeCaption]
+        : [t.card.offline, t.card.offlineCaption];
+  // After an unlimited session, the time to charge takes the big line until the next session.
+  const played = state.kind === "free" || state.kind === "offline" ? state.playedMs : undefined;
   return (
     <div className="readout">
-      <p className="word">{word}</p>
+      <p className="word">{played === undefined ? word : t.card.played(formatRemaining(played))}</p>
       <p className="caption">{caption}</p>
     </div>
   );
@@ -129,12 +166,15 @@ function Readout({ state, now, serverOffsetMs }: { state: BayState; now: number;
 
 export function DeviceCard(props: DeviceCardProps) {
   const { device, games, now, serverOffsetMs } = props;
+  const { t } = useI18n();
+  const c = t.card;
   const state = bayState(device, now, serverOffsetMs);
-  const activeSession = state.kind === "playing" || state.kind === "ending" ? device.session : null;
+  const activeSession =
+    state.kind === "playing" || state.kind === "ending" || state.kind === "unlimited" ? device.session : null;
   const [customMin, setCustomMin] = useState("45");
   const [picked, setPicked] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const badge = launchBadge(props.pendingCommandId, device);
+  const status = launchStatus(props.pendingCommandId, device);
 
   // One picker for both launch paths: apps the headset reported (with a known
   // Meta App ID) and the café's configured game list.
@@ -149,7 +189,7 @@ export function DeviceCard(props: DeviceCardProps) {
     .filter((g) => g.enabled)
     .map((g) => {
       const blocked = needsAppId(g.metaAppId);
-      return { value: `game:${g.id}`, label: blocked ? `${g.name} (needs Meta App ID)` : g.name, disabled: blocked };
+      return { value: `game:${g.id}`, label: blocked ? c.needsAppId(g.name) : g.name, disabled: blocked };
     });
   const launchable = [...installedChoices, ...gameChoices].filter((choice) => !choice.disabled);
   const lastLaunched = device.expectedGame
@@ -171,17 +211,17 @@ export function DeviceCard(props: DeviceCardProps) {
   const openNow = !device.online
     ? "—"
     : device.usageAccessGranted === false
-      ? "Usage access required"
+      ? c.usageAccessRequired
       : device.usageAccessGranted === null
-        ? "Unavailable"
+        ? c.unavailable
         : device.foregroundApp
-          ? `${device.foregroundApp.name} for ${formatElapsedSince(device.foregroundApp.startedAt, now, serverOffsetMs)}`
-          : "No game open";
+          ? c.openFor(device.foregroundApp.name, formatElapsedSince(device.foregroundApp.startedAt, now, serverOffsetMs))
+          : c.noGameOpen;
   const connection = device.online
-    ? "Online"
+    ? c.online
     : device.lastSeenAt
-      ? `Seen ${formatAgo(device.lastSeenAt, now, serverOffsetMs)}`
-      : "Never connected";
+      ? c.seen(formatAgo(device.lastSeenAt, now, serverOffsetMs, t.time))
+      : c.neverConnected;
 
   return (
     <article
@@ -189,7 +229,7 @@ export function DeviceCard(props: DeviceCardProps) {
       className="bay"
       data-state={state.kind}
       data-online={device.online}
-      aria-label={`${device.name} ${device.online ? "online" : "offline"}`}
+      aria-label={c.state(device.name, device.online)}
     >
       <header className="bay-head">
         <h2>{device.name}</h2>
@@ -199,28 +239,34 @@ export function DeviceCard(props: DeviceCardProps) {
       <Readout state={state} now={now} serverOffsetMs={serverOffsetMs} />
 
       <dl className="facts">
-        <div><dt>Battery</dt><dd><Battery level={device.batteryLevel} charging={device.charging} /></dd></div>
-        <div><dt>Open now</dt><dd>{openNow}</dd></div>
-        <div><dt>Last launched</dt><dd>{device.expectedGame?.name ?? "—"}</dd></div>
+        <div><dt>{c.battery}</dt><dd><Battery level={device.batteryLevel} charging={device.charging} /></dd></div>
+        <div><dt>{c.openNow}</dt><dd>{openNow}</dd></div>
+        <div><dt>{c.lastLaunched}</dt><dd>{device.expectedGame?.name ?? "—"}</dd></div>
+        <div><dt>{c.model}</dt><dd>{device.model ?? "—"}</dd></div>
       </dl>
 
       {activeSession ? (
-        <div className="controls session" role="group" aria-label={`Session on ${device.name}`}>
-          <button className="btn" aria-label={`Extend session 15 minutes on ${device.name}`} disabled={props.busy} onClick={() => props.onExtend(activeSession.id, 15)}>
-            +15 min
-          </button>
-          <button className="btn" aria-label={`Extend session 30 minutes on ${device.name}`} disabled={props.busy} onClick={() => props.onExtend(activeSession.id, 30)}>
-            +30 min
-          </button>
-          <button className="btn btn-stop" aria-label={`Stop session on ${device.name}`} disabled={props.busy} onClick={() => props.onStop(activeSession.id)}>
-            Stop
+        <div className="controls session" role="group" aria-label={c.sessionGroup(device.name)}>
+          {/* An unlimited session has no end to extend. */}
+          {state.kind !== "unlimited" && (
+            <>
+              <button className="btn" aria-label={c.extendLabel(15, device.name)} disabled={props.busy} onClick={() => props.onExtend(activeSession.id, 15)}>
+                {c.plusMinutes(15)}
+              </button>
+              <button className="btn" aria-label={c.extendLabel(30, device.name)} disabled={props.busy} onClick={() => props.onExtend(activeSession.id, 30)}>
+                {c.plusMinutes(30)}
+              </button>
+            </>
+          )}
+          <button className="btn btn-stop" aria-label={c.stopLabel(device.name)} disabled={props.busy} onClick={() => props.onStop(activeSession.id)}>
+            {c.stop}
           </button>
         </div>
       ) : (
-        <div className="controls start" role="group" aria-label={`Start a session on ${device.name}`}>
+        <div className="controls start" role="group" aria-label={c.startGroup(device.name)}>
           {[30, 60, 90].map((m) => (
-            <button key={m} className="btn" aria-label={`Start ${m} minute session on ${device.name}`} disabled={props.busy} onClick={() => props.onStartSession(device.id, m)}>
-              {m} min
+            <button key={m} className="btn" aria-label={c.startLabel(m, device.name)} disabled={props.busy} onClick={() => props.onStartSession(device.id, m)}>
+              {c.minutes(m)}
             </button>
           ))}
           <form
@@ -232,15 +278,18 @@ export function DeviceCard(props: DeviceCardProps) {
           >
             <span className="minutes">
               <input
-                aria-label={`Custom session minutes for ${device.name}`}
+                aria-label={c.customLabel(device.name)}
                 inputMode="numeric"
                 value={customMin}
                 onChange={(event) => setCustomMin(event.target.value)}
               />
-              <span aria-hidden="true">min</span>
+              <span aria-hidden="true">{c.minutesUnit}</span>
             </span>
-            <button className="btn" type="submit" aria-label={`Start custom session on ${device.name}`} disabled={props.busy}>
-              Start
+            <button className="btn" type="submit" aria-label={c.startCustomLabel(device.name)} disabled={props.busy}>
+              {c.start}
+            </button>
+            <button className="btn" type="button" aria-label={c.startUnlimitedLabel(device.name)} disabled={props.busy} onClick={() => props.onStartSession(device.id, null)}>
+              {c.unlimited}
             </button>
           </form>
         </div>
@@ -248,19 +297,19 @@ export function DeviceCard(props: DeviceCardProps) {
 
       <div className="controls launch">
         <select
-          aria-label={`Game for ${device.name}`}
+          aria-label={c.gameFor(device.name)}
           value={selected}
           onChange={(event) => setPicked(event.target.value)}
           disabled={!device.online || props.busy || launchable.length === 0}
         >
-          {launchable.length === 0 && <option value="">No games ready to launch</option>}
+          {launchable.length === 0 && <option value="">{c.noGamesReady}</option>}
           {installedChoices.length > 0 && (
-            <optgroup label="Installed on this headset">
+            <optgroup label={c.installedGroup}>
               {installedChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
             </optgroup>
           )}
           {gameChoices.length > 0 && (
-            <optgroup label="Café game list">
+            <optgroup label={c.cafeGroup}>
               {gameChoices.map((choice) => (
                 <option key={choice.value} value={choice.value} disabled={choice.disabled}>{choice.label}</option>
               ))}
@@ -269,29 +318,29 @@ export function DeviceCard(props: DeviceCardProps) {
         </select>
         <button
           className="btn btn-primary"
-          aria-label={`Launch game on ${device.name}`}
+          aria-label={c.launchLabel(device.name)}
           disabled={!canLaunch}
-          title={!device.online ? "Headset offline" : undefined}
+          title={!device.online ? c.headsetOffline : undefined}
           onClick={launch}
         >
-          Launch
+          {c.launch}
         </button>
       </div>
 
-      {badge && <p className="note" data-tone={badgeTone(badge)} role="status" aria-live="polite">{badge}</p>}
+      {status && (
+        <p className="note" data-tone={BADGE_TONE[status.kind]} role="status" aria-live="polite">
+          {badgeText(status, c)}
+        </p>
+      )}
       {props.error && <p className="note" data-tone="bad" role="alert">{props.error}</p>}
 
       {device.installedApps.length > 0 && (
-        <p className="inventory">
-          {device.installedApps.length} {device.installedApps.length === 1 ? "app" : "apps"} on this headset, {mappedInstalled.length} ready to launch
-        </p>
+        <p className="inventory">{c.inventory(device.installedApps.length, mappedInstalled.length)}</p>
       )}
       {unmatchedInstalled.length > 0 && (
         <details className="unmatched">
-          <summary>
-            {unmatchedInstalled.length} {unmatchedInstalled.length === 1 ? "app needs" : "apps need"} a Meta App ID
-          </summary>
-          <p className="hint">Try “Update app list” at the bottom of the page first. Enter an ID only for apps still listed here.</p>
+          <summary>{c.needIds(unmatchedInstalled.length)}</summary>
+          <p className="hint">{c.needIdsHint(t.catalog.update)}</p>
           {unmatchedInstalled.map((app) => (
             <UnmatchedAppMapping
               key={app.packageName}
@@ -310,28 +359,24 @@ export function DeviceCard(props: DeviceCardProps) {
             <div
               className="confirm"
               role="group"
-              aria-label={`Remove ${device.name}?`}
+              aria-label={c.removeGroup(device.name)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setConfirmingRemove(false);
               }}
             >
-              <p>
-                Remove {device.name} from the board?
-                {device.session?.status === "active" && " Its running session is discarded too."} It
-                comes back if the headset connects again.
-              </p>
+              <p>{c.removeQuestion(device.name, device.session?.status === "active")}</p>
               <div className="controls">
-                <button className="btn btn-remove" aria-label={`Confirm removing ${device.name}`} disabled={props.busy} onClick={() => props.onRemove(device.id)}>
-                  Remove
+                <button className="btn btn-remove" aria-label={c.confirmRemoveLabel(device.name)} disabled={props.busy} onClick={() => props.onRemove(device.id)}>
+                  {c.remove}
                 </button>
-                <button className="btn" aria-label={`Keep ${device.name}`} autoFocus onClick={() => setConfirmingRemove(false)}>
-                  Keep
+                <button className="btn" aria-label={c.keepLabel(device.name)} autoFocus onClick={() => setConfirmingRemove(false)}>
+                  {c.keep}
                 </button>
               </div>
             </div>
           ) : (
-            <button className="btn-text" aria-label={`Remove ${device.name} from the board`} onClick={() => setConfirmingRemove(true)}>
-              Remove headset
+            <button className="btn-text" aria-label={c.removeLabel(device.name)} onClick={() => setConfirmingRemove(true)}>
+              {c.removeHeadset}
             </button>
           )}
         </footer>

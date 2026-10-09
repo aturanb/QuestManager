@@ -62,3 +62,30 @@ describe("bayState", () => {
     expect(bayState(device(null, false), START, 0)).toEqual({ kind: "offline" });
   });
 });
+
+describe("bayState for unlimited sessions", () => {
+  const PLAYED = 72 * 60_000 + 5_000;
+  const running = (online = true): Device => ({
+    ...device(null, online),
+    session: { id: "u", startedAt: new Date(START).toISOString(), endsAt: null, status: "active" },
+  });
+  const stopped = (online = true): Device => ({
+    ...device(null, online),
+    session: { id: "u", startedAt: new Date(START).toISOString(), endsAt: new Date(START + PLAYED).toISOString(), status: "stopped" },
+  });
+
+  it("counts up from the start on the server clock", () => {
+    expect(bayState(running(), START + 10 * 60_000, 0)).toEqual({ kind: "unlimited", playedMs: 10 * 60_000 });
+    // Browser runs 5 minutes slow: the server has already seen 15 minutes of play.
+    expect(bayState(running(), START + 10 * 60_000, 5 * 60_000)).toEqual({ kind: "unlimited", playedMs: 15 * 60_000 });
+  });
+
+  it("keeps counting on an offline headset", () => {
+    expect(bayState(running(false), START + 60_000, 0).kind).toBe("unlimited");
+  });
+
+  it("frees the bay after Stop but keeps the played time to charge", () => {
+    expect(bayState(stopped(), START + 2 * PLAYED, 0)).toEqual({ kind: "free", playedMs: PLAYED });
+    expect(bayState(stopped(false), START + 2 * PLAYED, 0)).toEqual({ kind: "offline", playedMs: PLAYED });
+  });
+});

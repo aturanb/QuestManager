@@ -47,6 +47,15 @@ describe("BoardSummary", () => {
     expect(screen.queryByText(/time up/)).not.toBeInTheDocument();
   });
 
+  it("marks an unlimited session with ∞ and counts it as playing", () => {
+    render(<BoardSummary now={NOW} serverOffsetMs={0} devices={[
+      device("01", { session: { id: "u", startedAt: new Date(NOW - 42 * 60_000 - 30_000).toISOString(), endsAt: null, status: "active" } }),
+      device("02", { session: session(10 * 60_000) }),
+    ]} />);
+    expect(screen.getByRole("link", { name: "Quest 01: unlimited, 42 min played" })).toHaveTextContent("∞");
+    expect(screen.getByText("2 playing")).toBeInTheDocument();
+  });
+
   it("shows under a minute as <1 rather than 0", () => {
     render(<BoardSummary now={NOW} serverOffsetMs={0} devices={[device("01", { session: session(30_000) })]} />);
     expect(screen.getByRole("link", { name: "Quest 01: <1 min left" })).toHaveTextContent("<1");

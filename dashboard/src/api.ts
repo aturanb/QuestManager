@@ -74,7 +74,8 @@ export function mapInstalledApp(
   );
 }
 
-export function startSession(key: string, deviceId: string, minutes: number): Promise<{ session: unknown }> {
+/** `minutes: null` starts an unlimited session. */
+export function startSession(key: string, deviceId: string, minutes: number | null): Promise<{ session: unknown }> {
   return apiFetch(`/api/devices/${deviceId}/sessions`, key, { method: "POST", body: JSON.stringify({ minutes }) });
 }
 

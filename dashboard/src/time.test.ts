@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatAgo, formatRemaining, remainingMs } from "./time";
+import { messages } from "./messages";
 
 describe("formatRemaining", () => {
   it.each([
@@ -28,5 +29,17 @@ describe("formatAgo", () => {
     [new Date(660_000).toISOString(), "5 min ago"],
   ])("%s -> %s", (iso, expected) => {
     expect(formatAgo(iso, 1_000_000, 0)).toBe(expected);
+  });
+});
+
+describe("formatAgo in Turkish", () => {
+  it.each([
+    [null, "hiç"],
+    [new Date(999_000).toISOString(), "az önce"],
+    [new Date(970_000).toISOString(), "30 sn önce"],
+    [new Date(660_000).toISOString(), "5 dk önce"],
+    [new Date(1_000_000 - 2 * 3_600_000 - 5 * 60_000).toISOString(), "2 sa 5 dk önce"],
+  ])("%s -> %s", (iso, expected) => {
+    expect(formatAgo(iso, 1_000_000, 0, messages.tr.time)).toBe(expected);
   });
 });
