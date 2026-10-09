@@ -43,4 +43,11 @@ class AgentStringsTest {
         assertEquals("—", displayResult("—", tr))
         assertEquals("FAILED LAUNCH_FAILED", displayResult("FAILED LAUNCH_FAILED", AgentLanguage.EN.strings))
     }
+
+    @Test
+    fun searchingSpeaksTurkish() {
+        val searching = linkStatus(ConnState.SEARCHING, "192.168.1.150", 3000, AgentLanguage.TR.strings)
+        assertEquals("Sunucu aranıyor…", searching.word)
+        assertEquals("Kafe bilgisayarı bu Wi-Fi ağında aranıyor.", searching.caption)
+    }
 }

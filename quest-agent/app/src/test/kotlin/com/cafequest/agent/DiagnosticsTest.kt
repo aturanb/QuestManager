@@ -50,4 +50,20 @@ class DiagnosticsTest {
         assertEquals("Beat Saber", diagnostics.state.value.expectedGame?.name)
         assertEquals("2026-01-02T03:04:05Z", diagnostics.state.value.expectedGame?.launchedAt)
     }
+
+    @Test fun `diagnostics carries the server the agent dials`() {
+        val diagnostics = AgentDiagnostics { "2026-01-02T03:04:05Z" }
+        assertNull(diagnostics.state.value.server)
+        val identity = AgentIdentity(
+            deviceId = "d",
+            deviceName = "Quest 01",
+            serverHost = "192.168.1.150",
+            serverPort = 3000,
+            serverMode = ServerMode.AUTO,
+            serverName = "CAFE-PC",
+            metaAppId = "1",
+        )
+        diagnostics.setServer(identity.serverTarget())
+        assertEquals(ServerTarget("CAFE-PC", "192.168.1.150", 3000, ServerMode.AUTO), diagnostics.state.value.server)
+    }
 }

@@ -19,11 +19,12 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
 /** Connection state surfaced on the diagnostics screen. */
-enum class ConnState { DISCONNECTED, CONNECTING, CONNECTED }
+enum class ConnState { DISCONNECTED, SEARCHING, CONNECTING, CONNECTED }
 
 /**
  * OkHttp WebSocket agent loop (§24): hello → telemetry every 5s → ack/result
  * on launch commands, with §25 backoff reconnect. Network loss never crashes.
+ * In Auto mode the loop finds the café PC on the Wi-Fi first (ServerLocator).
  */
 class AgentConnection(
     private val context: Context,
@@ -32,11 +33,24 @@ class AgentConnection(
     private val diagnostics: AgentDiagnostics = AgentRuntime.diagnostics,
     private val installedAppsProvider: () -> InstalledAppScanResult = { scanInstalledApps(context) },
     private val foregroundAppReader: ForegroundAppReader = AndroidForegroundAppReader(context),
+    private val discovery: ServerDiscovery = ServerDiscovery({ wifiBroadcastTargets(context) }),
 ) : ManagedAgentConnection {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
+        // A LAN connect takes milliseconds; an old IP the café PC left must not cost 10s a try.
+        .connectTimeout(3, TimeUnit.SECONDS)
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
+    private val locator = ServerLocator(
+        initial = identity.serverTarget(),
+        search = { discovery.search() },
+        persist = { found -> IdentityStore(context).saveDiscovered(found) },
+        onSearching = { diagnostics.setConnection(ConnState.SEARCHING) },
+        onTarget = {
+            diagnostics.setServer(it)
+            Log.i(LOG_TAG, "found ${it.name} at ${it.host}:${it.port}")
+        },
+    )
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var running = false
@@ -46,6 +60,7 @@ class AgentConnection(
     override fun start() {
         if (running) return
         running = true
+        diagnostics.setServer(locator.target)
         scope.launch { loop() }
         scope.launch { telemetryLoop() }
     }
@@ -81,11 +96,18 @@ class AgentConnection(
 
     private suspend fun loop() {
         while (running && scope.isActive) {
-            diagnostics.setConnection(ConnState.CONNECTING)
-            try { connectOnce() } catch (e: Exception) {
-                Log.w(LOG_TAG, "connect failed: ${e.message}")
-            }
+            val server = locator.beforeConnect(attempt)
             if (!running) break
+            if (server.host.isBlank()) {
+                // Nothing saved and nothing answered: wait like a failed connect, then search again.
+                diagnostics.setConnection(ConnState.DISCONNECTED)
+            } else {
+                diagnostics.setConnection(ConnState.CONNECTING)
+                try { connectOnce(server) } catch (e: Exception) {
+                    Log.w(LOG_TAG, "connect failed: ${e.message}")
+                }
+                if (!running) break
+            }
             // connectOnce returns only after the socket dies; back off, then retry.
             val wait = backoffDelayMs(attempt++)
             Log.i(LOG_TAG, "reconnecting in ${wait}ms (attempt $attempt)")
@@ -94,8 +116,8 @@ class AgentConnection(
         diagnostics.setConnection(ConnState.DISCONNECTED)
     }
 
-    private suspend fun connectOnce() {
-        val url = IdentityStore(context).wsUrl(identity.serverHost, identity.serverPort)
+    private suspend fun connectOnce(server: ServerTarget) {
+        val url = IdentityStore(context).wsUrl(server.host, server.port)
         val request = Request.Builder().url(url).build()
         val opened = kotlinx.coroutines.CompletableDeferred<WebSocket>()
         val dead = kotlinx.coroutines.CompletableDeferred<Unit>()

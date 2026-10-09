@@ -30,6 +30,9 @@ interface AgentStrings {
     val notConnected: String
     fun cantReach(server: String?): String
 
+    val searching: String
+    val searchingCaption: String
+
     val server: String
     val battery: String
     val charging: String
@@ -71,6 +74,9 @@ object EnglishStrings : AgentStrings {
     override fun reaching(server: String?) = "Reaching ${server ?: "the café PC"}"
     override val notConnected = "Not connected"
     override fun cantReach(server: String?) = "Can't reach ${server ?: "the café PC"}. Check the café Wi-Fi, then tap $reconnect."
+
+    override val searching = "Searching for server…"
+    override val searchingCaption = "Looking for the café PC on this Wi-Fi."
 
     override val server = "Server"
     override val battery = "Battery"
@@ -116,6 +122,9 @@ object TurkishStrings : AgentStrings {
     override fun cantReach(server: String?) =
         (if (server == null) "Kafe bilgisayarına ulaşılamıyor." else "$server adresine ulaşılamıyor.") +
             " Kafe Wi-Fi ağını kontrol edin, sonra “$reconnect” düğmesine dokunun."
+
+    override val searching = "Sunucu aranıyor…"
+    override val searchingCaption = "Kafe bilgisayarı bu Wi-Fi ağında aranıyor."
 
     override val server = "Sunucu"
     override val battery = "Pil"

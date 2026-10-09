@@ -40,4 +40,12 @@ class HeadsetStatusTest {
         assertEquals(4, litBatteryCells(82))
         assertEquals(5, litBatteryCells(100))
     }
+
+    @Test
+    fun searchingSaysWhatTheHeadsetIsDoing() {
+        val status = linkStatus(ConnState.SEARCHING, null, null)
+        assertEquals("Searching for server…", status.word)
+        assertEquals("Looking for the café PC on this Wi-Fi.", status.caption)
+        assertEquals(LinkTone.WAITING, status.tone)
+    }
 }

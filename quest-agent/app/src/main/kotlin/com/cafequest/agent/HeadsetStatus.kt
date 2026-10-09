@@ -15,6 +15,7 @@ fun linkStatus(
     val server = if (serverHost.isNullOrBlank()) null else "$serverHost:${serverPort ?: 3000}"
     return when (connection) {
         ConnState.CONNECTED -> LinkStatus(strings.connected, strings.connectedCaption, LinkTone.READY)
+        ConnState.SEARCHING -> LinkStatus(strings.searching, strings.searchingCaption, LinkTone.WAITING)
         ConnState.CONNECTING -> LinkStatus(strings.connecting, strings.reaching(server), LinkTone.WAITING)
         ConnState.DISCONNECTED -> LinkStatus(strings.notConnected, strings.cantReach(server), LinkTone.OFFLINE)
     }

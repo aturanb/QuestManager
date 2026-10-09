@@ -6,6 +6,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+/** The server the agent dials right now, as the diagnostics screen shows it. */
+data class ServerTarget(val name: String?, val host: String, val port: Int, val mode: ServerMode)
+
+fun AgentIdentity.serverTarget(): ServerTarget = ServerTarget(serverName, serverHost, serverPort, serverMode)
+
 data class AgentDiagnosticsState(
     val connection: ConnState = ConnState.DISCONNECTED,
     val battery: Battery? = null,
@@ -13,6 +18,8 @@ data class AgentDiagnosticsState(
     val expectedGame: ExpectedGame? = null,
     val lastCommand: String = "—",
     val lastResult: String = "—",
+    /** Published by the connection; Auto discovery may move it. Null until the service starts. */
+    val server: ServerTarget? = null,
 )
 
 /** Process-local state shared by the foreground service and diagnostics UI. */
@@ -27,6 +34,7 @@ class AgentDiagnostics(
     fun setConnection(connection: ConnState) = _state.update { it.copy(connection = connection) }
     fun setBattery(battery: Battery) = _state.update { it.copy(battery = battery) }
     fun setServiceRunning(running: Boolean) = _state.update { it.copy(serviceRunning = running) }
+    fun setServer(server: ServerTarget) = _state.update { it.copy(server = server) }
 
     suspend fun launch(payload: LaunchPayload, launcher: AppLauncher, command: String): LaunchOutcome {
         lastLaunch = payload
