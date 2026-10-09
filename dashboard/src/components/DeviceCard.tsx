@@ -13,6 +13,8 @@ export type DeviceCardProps = {
   busy: boolean;
   error: string | null;
   selected?: boolean;
+  actionTargetCount?: number;
+  actionResult?: string | null;
   onSelectedChange?: (deviceId: string, selected: boolean) => void;
   onLaunch: (deviceId: string, gameId: string) => void;
   onLaunchInstalled: (deviceId: string, packageName: string) => void;
@@ -202,7 +204,10 @@ export function DeviceCard(props: DeviceCardProps) {
   const fallback = launchable.find((choice) => choice.value === lastLaunched)?.value ?? launchable[0]?.value ?? "";
   // A pick that vanished (app uninstalled, game disabled) falls back instead of launching stale.
   const selected = picked !== null && launchable.some((choice) => choice.value === picked) ? picked : fallback;
+  const selectedLabel = launchable.find((choice) => choice.value === selected)?.label ?? "";
   const canLaunch = device.online && !props.busy && selected !== "";
+  const actionTargetCount = props.selected === true ? props.actionTargetCount ?? 0 : 0;
+  const targetsSelection = actionTargetCount > 0;
 
   function launch() {
     if (selected.startsWith("pkg:")) props.onLaunchInstalled(device.id, selected.slice("pkg:".length));
@@ -260,6 +265,8 @@ export function DeviceCard(props: DeviceCardProps) {
         <div><dt>{c.model}</dt><dd>{device.model ?? "—"}</dd></div>
       </dl>
 
+      {targetsSelection && <p className="action-scope">{t.bulk.scope(actionTargetCount)}</p>}
+
       {activeSession ? (
         <div className="controls session" role="group" aria-label={c.sessionGroup(device.name)}>
           {/* An unlimited session has no end to extend. */}
@@ -280,7 +287,13 @@ export function DeviceCard(props: DeviceCardProps) {
       ) : (
         <div className="controls start" role="group" aria-label={c.startGroup(device.name)}>
           {[30, 60, 90].map((m) => (
-            <button key={m} className="btn" aria-label={c.startLabel(m, device.name)} disabled={props.busy} onClick={() => props.onStartSession(device.id, m)}>
+            <button
+              key={m}
+              className="btn"
+              aria-label={targetsSelection ? t.bulk.startMinutesLabel(m, actionTargetCount) : c.startLabel(m, device.name)}
+              disabled={props.busy}
+              onClick={() => props.onStartSession(device.id, m)}
+            >
               {c.minutes(m)}
             </button>
           ))}
@@ -293,17 +306,28 @@ export function DeviceCard(props: DeviceCardProps) {
           >
             <span className="minutes">
               <input
-                aria-label={c.customLabel(device.name)}
+                aria-label={targetsSelection ? t.bulk.customMinutes(actionTargetCount) : c.customLabel(device.name)}
                 inputMode="numeric"
                 value={customMin}
                 onChange={(event) => setCustomMin(event.target.value)}
               />
               <span aria-hidden="true">{c.minutesUnit}</span>
             </span>
-            <button className="btn" type="submit" aria-label={c.startCustomLabel(device.name)} disabled={props.busy}>
+            <button
+              className="btn"
+              type="submit"
+              aria-label={targetsSelection ? t.bulk.startCustomLabel(actionTargetCount) : c.startCustomLabel(device.name)}
+              disabled={props.busy}
+            >
               {c.start}
             </button>
-            <button className="btn" type="button" aria-label={c.startUnlimitedLabel(device.name)} disabled={props.busy} onClick={() => props.onStartSession(device.id, null)}>
+            <button
+              className="btn"
+              type="button"
+              aria-label={targetsSelection ? t.bulk.startUnlimitedLabel(actionTargetCount) : c.startUnlimitedLabel(device.name)}
+              disabled={props.busy}
+              onClick={() => props.onStartSession(device.id, null)}
+            >
               {c.unlimited}
             </button>
           </form>
@@ -333,7 +357,9 @@ export function DeviceCard(props: DeviceCardProps) {
         </select>
         <button
           className="btn btn-primary"
-          aria-label={c.launchLabel(device.name)}
+          aria-label={targetsSelection && selectedLabel
+            ? t.bulk.launchLabel(selectedLabel, actionTargetCount)
+            : c.launchLabel(device.name)}
           disabled={!canLaunch}
           title={!device.online ? c.headsetOffline : undefined}
           onClick={launch}
@@ -347,6 +373,7 @@ export function DeviceCard(props: DeviceCardProps) {
           {badgeText(status, c)}
         </p>
       )}
+      {props.actionResult && <p className="note action-result" data-tone="wait" role="status">{props.actionResult}</p>}
       {props.error && <p className="note" data-tone="bad" role="alert">{props.error}</p>}
 
       {device.installedApps.length > 0 && (

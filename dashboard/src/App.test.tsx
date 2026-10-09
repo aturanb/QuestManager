@@ -172,13 +172,17 @@ describe("App", () => {
     const fetchMock = stubBoard(
       [
         device("d1", "Quest 01"),
-        device("d2", "Quest 02", { session: active }),
-        device("d3", "Quest 03", { online: false }),
+        device("d2", "Quest 02"),
+        device("d3", "Quest 03", { session: active }),
+        device("d4", "Quest 04", { online: false }),
       ],
       [],
       (path, init) => {
         if (path === "/api/devices/d1/sessions" && init?.method === "POST") {
           return new Response(JSON.stringify({ session: { ...active, id: "session-1" } }), { status: 201 });
+        }
+        if (path === "/api/devices/d2/sessions" && init?.method === "POST") {
+          return new Response(JSON.stringify({ session: { ...active, id: "session-2" } }), { status: 201 });
         }
       }
     );
@@ -186,67 +190,92 @@ describe("App", () => {
 
     await screen.findByRole("checkbox", { name: "Select Quest 01" });
     fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
-    expect(screen.getByRole("combobox", { name: "Session length for selected headsets" })).toHaveValue("60");
-    fireEvent.click(screen.getByRole("button", { name: "Start session on 3 selected headsets" }));
+    expect(screen.queryByRole("combobox", { name: "Session length for selected headsets" })).not.toBeInTheDocument();
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Start 60 minute session on 4 selected headsets" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Started 1 session; skipped 2 headsets.");
-    expect(within(screen.getByRole("article", { name: "Quest 02 online" })).getByRole("alert"))
+    expect(await within(firstCard).findByText("Started 2 sessions; skipped 2 headsets.")).toHaveAttribute("role", "status");
+    expect(within(screen.getByRole("article", { name: "Quest 03 online" })).getByRole("alert"))
       .toHaveTextContent("A session is already running on this headset.");
-    expect(within(screen.getByRole("article", { name: "Quest 03 offline" })).getByRole("alert"))
+    expect(within(screen.getByRole("article", { name: "Quest 04 offline" })).getByRole("alert"))
       .toHaveTextContent("Headset is offline. Wait for it to reconnect.");
 
     await waitFor(() => {
       const sessionPosts = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/sessions"));
-      expect(sessionPosts).toHaveLength(1);
-      expect(sessionPosts[0]?.[0]).toBe("/api/devices/d1/sessions");
-      expect(JSON.parse(String(sessionPosts[0]?.[1]?.body))).toEqual({ minutes: 60 });
+      expect(sessionPosts.map((call) => call[0])).toEqual([
+        "/api/devices/d1/sessions",
+        "/api/devices/d2/sessions",
+      ]);
+      expect(sessionPosts.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+        { minutes: 60 },
+        { minutes: 60 },
+      ]);
     });
   });
 
   it("starts an unlimited session on every eligible selected headset", async () => {
-    const fetchMock = stubBoard([device("d1", "Quest 01")], [], (path, init) => {
-      if (path === "/api/devices/d1/sessions" && init?.method === "POST") {
-        return new Response(JSON.stringify({ session: { id: "s1" } }), { status: 201 });
+    const fetchMock = stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")], [], (path, init) => {
+      if (path.endsWith("/sessions") && init?.method === "POST") {
+        return new Response(JSON.stringify({ session: { id: path } }), { status: 201 });
       }
     });
     render(<App />, { wrapper: LangProvider });
 
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Quest 01" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Session length for selected headsets" }), {
-      target: { value: "unlimited" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Start session on 1 selected headset" }));
+    await screen.findByRole("checkbox", { name: "Select Quest 01" });
+    fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Start unlimited session on 2 selected headsets" }));
 
     await waitFor(() => {
-      const post = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/sessions"));
-      expect(JSON.parse(String(post?.[1]?.body))).toEqual({ minutes: null });
+      const posts = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/sessions"));
+      expect(posts).toHaveLength(2);
+      expect(posts.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+        { minutes: null },
+        { minutes: null },
+      ]);
     });
   });
 
-  it("validates and starts a custom-length bulk session", async () => {
-    const fetchMock = stubBoard([device("d1", "Quest 01")], [], (path, init) => {
-      if (path === "/api/devices/d1/sessions" && init?.method === "POST") {
-        return new Response(JSON.stringify({ session: { id: "s1" } }), { status: 201 });
+  it("starts a custom-length session on selected headsets from one selected card", async () => {
+    const fetchMock = stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")], [], (path, init) => {
+      if (path.endsWith("/sessions") && init?.method === "POST") {
+        return new Response(JSON.stringify({ session: { id: path } }), { status: 201 });
       }
     });
     render(<App />, { wrapper: LangProvider });
 
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Quest 01" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Session length for selected headsets" }), {
-      target: { value: "custom" },
-    });
-    const minutes = screen.getByRole("textbox", { name: "Custom session minutes for selected headsets" });
-    const start = screen.getByRole("button", { name: "Start session on 1 selected headset" });
-    fireEvent.change(minutes, { target: { value: "0" } });
-    expect(start).toBeDisabled();
+    await screen.findByRole("checkbox", { name: "Select Quest 01" });
+    fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    const minutes = within(firstCard).getByRole("textbox", { name: "Custom session minutes for 2 selected headsets" });
+    const start = within(firstCard).getByRole("button", { name: "Start custom session on 2 selected headsets" });
     fireEvent.change(minutes, { target: { value: "45" } });
-    expect(start).toBeEnabled();
     fireEvent.click(start);
 
     await waitFor(() => {
-      const post = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/sessions"));
-      expect(JSON.parse(String(post?.[1]?.body))).toEqual({ minutes: 45 });
+      const posts = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/sessions"));
+      expect(posts).toHaveLength(2);
+      expect(posts.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+        { minutes: 45 },
+        { minutes: 45 },
+      ]);
     });
+  });
+
+  it("rejects an out-of-range custom session before sending it to selected headsets", async () => {
+    const fetchMock = stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")]);
+    render(<App />, { wrapper: LangProvider });
+
+    await screen.findByRole("checkbox", { name: "Select Quest 01" });
+    fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    fireEvent.change(within(firstCard).getByRole("textbox", { name: "Custom session minutes for 2 selected headsets" }), {
+      target: { value: "1441" },
+    });
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Start custom session on 2 selected headsets" }));
+
+    expect(await within(firstCard).findByRole("alert")).toHaveTextContent("enter 1–1440 minutes");
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/sessions"))).toHaveLength(0);
   });
 
   it("launches one game on eligible selected headsets and keeps going after a failure", async () => {
@@ -271,12 +300,14 @@ describe("App", () => {
 
     await screen.findByRole("checkbox", { name: "Select Quest 01" });
     fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
-    expect(screen.getByRole("combobox", { name: "Game for selected headsets" })).toHaveValue("beat-saber");
-    fireEvent.click(screen.getByRole("button", { name: "Launch Beat Saber on 3 selected headsets" }));
+    expect(screen.queryByRole("combobox", { name: "Game for selected headsets" })).not.toBeInTheDocument();
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    expect(within(firstCard).getByText("Start and Launch apply to 3 selected headsets")).toBeInTheDocument();
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Launch Beat Saber on 3 selected headsets" }));
 
-    expect(await screen.findByText("Sent Beat Saber to 1 headset; skipped 2 headsets.")).toHaveAttribute("role", "status");
-    expect(within(screen.getByRole("article", { name: "Quest 01 online" })).getByRole("status"))
-      .toHaveTextContent("Launching…");
+    expect(await within(firstCard).findByText("Sent Beat Saber to 1 headset; skipped 2 headsets.")).toHaveAttribute("role", "status");
+    expect(within(screen.getByRole("article", { name: "Quest 01 online" })).getByText("Launching…"))
+      .toHaveAttribute("role", "status");
     expect(within(screen.getByRole("article", { name: "Quest 02 online" })).getByRole("alert"))
       .toHaveTextContent("That game isn't installed on this headset.");
     expect(within(screen.getByRole("article", { name: "Quest 03 offline" })).getByRole("alert"))
@@ -290,6 +321,72 @@ describe("App", () => {
     ]);
   });
 
+  it("launches an installed app from one selected card on every selected headset", async () => {
+    const installed = {
+      packageName: "com.example.alpha",
+      label: "Alpha",
+      versionName: "1",
+      versionCode: 1,
+      name: "Alpha VR",
+      metaAppId: "11111",
+      source: "catalog" as const,
+    };
+    const fetchMock = stubBoard(
+      [
+        device("d1", "Quest 01", { installedApps: [installed] }),
+        device("d2", "Quest 02", { installedApps: [installed] }),
+      ],
+      [],
+      (path, init) => {
+        if (path.endsWith("/launch-installed") && init?.method === "POST") {
+          return new Response(JSON.stringify({ commandId: `command-${path}`, status: "sent" }), { status: 202 });
+        }
+      }
+    );
+    render(<App />, { wrapper: LangProvider });
+
+    await screen.findByRole("checkbox", { name: "Select Quest 01" });
+    fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Launch Alpha VR on 2 selected headsets" }));
+
+    await waitFor(() => {
+      const launches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/launch-installed"));
+      expect(launches.map((call) => call[0])).toEqual([
+        "/api/devices/d1/launch-installed",
+        "/api/devices/d2/launch-installed",
+      ]);
+      expect(launches.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+        { packageName: "com.example.alpha" },
+        { packageName: "com.example.alpha" },
+      ]);
+    });
+  });
+
+  it("keeps an unselected card's actions scoped to that headset", async () => {
+    const games: Game[] = [{ id: "beat-saber", name: "Beat Saber", metaAppId: "2448060205267927", enabled: 1 }];
+    const fetchMock = stubBoard(
+      [device("d1", "Quest 01"), device("d2", "Quest 02"), device("d3", "Quest 03")],
+      games,
+      (path, init) => {
+        if (path === "/api/devices/d3/launch" && init?.method === "POST") {
+          return new Response(JSON.stringify({ commandId: "command-3", status: "sent" }), { status: 202 });
+        }
+      }
+    );
+    render(<App />, { wrapper: LangProvider });
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Quest 01" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Quest 02" }));
+    const thirdCard = screen.getByRole("article", { name: "Quest 03 online" });
+    fireEvent.click(within(thirdCard).getByRole("button", { name: "Launch game on Quest 03" }));
+
+    await waitFor(() => {
+      const launches = fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/launch"));
+      expect(launches.map((call) => call[0])).toEqual(["/api/devices/d3/launch"]);
+    });
+  });
+
   it("renders the multi-headset controls in Turkish", async () => {
     localStorage.setItem(LANG_STORAGE, "tr");
     stubBoard(
@@ -300,10 +397,11 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Quest 01 gözlüğünü seç" }));
     expect(screen.getByText("1 gözlük seçildi")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Seçili gözlükler için seans süresi" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1 seçili gözlükte seans başlat" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Seçili gözlükler için oyun" })).toHaveValue("beat-saber");
-    expect(screen.getByRole("button", { name: "Beat Saber oyununu 1 seçili gözlükte aç" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Seçili gözlükler için seans süresi" })).not.toBeInTheDocument();
+    const card = screen.getByRole("article", { name: "Quest 01 çevrimiçi" });
+    expect(within(card).getByText("Başlat ve Oyunu aç işlemleri seçili 1 gözlüğe uygulanır")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Seçili 1 gözlükte 60 dakikalık seans başlat" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Beat Saber oyununu seçili 1 gözlükte aç" })).toBeInTheDocument();
   });
 
   it("clears a completed bulk summary when the headset selection changes", async () => {
@@ -316,8 +414,9 @@ describe("App", () => {
 
     await screen.findByRole("checkbox", { name: "Select Quest 01" });
     fireEvent.click(screen.getByRole("button", { name: "Select all headsets" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start session on 2 selected headsets" }));
-    expect(await screen.findByText("Started 2 sessions; skipped 0 headsets.")).toBeInTheDocument();
+    const firstCard = screen.getByRole("article", { name: "Quest 01 online" });
+    fireEvent.click(within(firstCard).getByRole("button", { name: "Start 60 minute session on 2 selected headsets" }));
+    expect(await within(firstCard).findByText("Started 2 sessions; skipped 0 headsets.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Quest 02" }));
     expect(screen.getByText("1 headset selected")).toBeInTheDocument();

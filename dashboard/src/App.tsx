@@ -16,15 +16,19 @@ import {
   stopSession,
 } from "./api";
 import { BoardSummary } from "./components/BoardSummary";
-import { BulkActions, type BulkResult } from "./components/BulkActions";
 import { CatalogButton } from "./components/CatalogButton";
 import { DeviceCard } from "./components/DeviceCard";
 import { KeyPrompt } from "./components/KeyPrompt";
 import { LangToggle } from "./components/LangToggle";
+import { SelectionBar } from "./components/SelectionBar";
 import { friendlyError } from "./errors";
 import { useI18n } from "./i18n";
 
 const KEY_STORAGE = "cq-admin-key";
+
+type BulkResult =
+  | { originDeviceId: string; action: "session"; succeeded: number; failed: number }
+  | { originDeviceId: string; action: "launch"; gameName: string; succeeded: number; failed: number };
 
 export function App() {
   const { t } = useI18n();
@@ -32,7 +36,6 @@ export function App() {
   const [keyRequired, setKeyRequired] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
@@ -129,6 +132,7 @@ export function App() {
   }, [key, applySnapshot, demandKey]);
 
   async function runCardAction(deviceId: string, fn: () => Promise<{ commandId?: string } | unknown>) {
+    setBulkResult(null);
     setBusy((b) => ({ ...b, [deviceId]: true }));
     setCardErrors((e) => ({ ...e, [deviceId]: null }));
     try {
@@ -179,9 +183,8 @@ export function App() {
     }
   }
 
-  async function startBulkSession(minutes: number | null) {
+  async function startBulkSession(originDeviceId: string, minutes: number | null) {
     const selected = devices.filter((device) => selectedIds.has(device.id));
-    setBulkBusy(true);
     setBulkResult(null);
     setBusy((current) => ({
       ...current,
@@ -215,14 +218,16 @@ export function App() {
       ...current,
       ...Object.fromEntries(selected.map((device) => [device.id, false])),
     }));
-    setBulkBusy(false);
-    setBulkResult({ action: "session", succeeded, failed: selected.length - succeeded });
+    setBulkResult({ originDeviceId, action: "session", succeeded, failed: selected.length - succeeded });
   }
 
-  async function launchBulkGame(gameId: string, gameName: string) {
+  async function launchBulk(
+    originDeviceId: string,
+    gameName: string,
+    launch: (deviceId: string) => Promise<{ commandId: string }>
+  ) {
     const selected = devices.filter((device) => selectedIds.has(device.id));
     const eligible = selected.filter((device) => device.online);
-    setBulkBusy(true);
     setBulkResult(null);
     setBusy((current) => ({
       ...current,
@@ -238,7 +243,7 @@ export function App() {
 
     const results = await Promise.all(eligible.map(async (device) => {
       try {
-        const response = await launchGame(key, device.id, gameId);
+        const response = await launch(device.id);
         setPending((current) => ({ ...current, [device.id]: response.commandId }));
         return true;
       } catch (error) {
@@ -253,8 +258,7 @@ export function App() {
       ...current,
       ...Object.fromEntries(selected.map((device) => [device.id, false])),
     }));
-    setBulkBusy(false);
-    setBulkResult({ action: "launch", gameName, succeeded, failed: selected.length - succeeded });
+    setBulkResult({ originDeviceId, action: "launch", gameName, succeeded, failed: selected.length - succeeded });
   }
 
   if (keyRequired) {
@@ -290,19 +294,11 @@ export function App() {
         </div>
       )}
       {devices.length > 0 && (
-        <BulkActions
+        <SelectionBar
           selectedCount={selectedIds.size}
           totalCount={devices.length}
-          games={games}
-          busy={bulkBusy}
-          result={bulkResult}
           onSelectAll={() => setSelectedIds(new Set(devices.map((device) => device.id)))}
-          onClear={() => {
-            setSelectedIds(new Set());
-            setBulkResult(null);
-          }}
-          onStartSession={startBulkSession}
-          onLaunchGame={launchBulkGame}
+          onClear={() => setSelectedIds(new Set())}
         />
       )}
       <section className="board" aria-label={t.app.headsets}>
@@ -317,6 +313,12 @@ export function App() {
             busy={!!busy[d.id]}
             error={cardErrors[d.id] != null ? friendlyError(cardErrors[d.id], t) : null}
             selected={selectedIds.has(d.id)}
+            actionTargetCount={selectedIds.has(d.id) ? selectedIds.size : 0}
+            actionResult={bulkResult?.originDeviceId === d.id
+              ? bulkResult.action === "session"
+                ? t.bulk.sessionResult(bulkResult.succeeded, bulkResult.failed)
+                : t.bulk.launchResult(bulkResult.gameName, bulkResult.succeeded, bulkResult.failed)
+              : null}
             onSelectedChange={(deviceId, selected) => {
               setSelectedIds((current) => {
                 const next = new Set(current);
@@ -325,20 +327,32 @@ export function App() {
                 return next;
               });
             }}
-            onLaunch={(deviceId, gameId) => runCardAction(deviceId, () => launchGame(key, deviceId, gameId))}
-            onLaunchInstalled={(deviceId, packageName) =>
-              runCardAction(deviceId, () => launchInstalledApp(key, deviceId, packageName))
-            }
+            onLaunch={(deviceId, gameId) => {
+              if (selectedIds.has(deviceId)) {
+                const gameName = games.find((game) => game.id === gameId)?.name ?? gameId;
+                return launchBulk(deviceId, gameName, (targetId) => launchGame(key, targetId, gameId));
+              }
+              return runCardAction(deviceId, () => launchGame(key, deviceId, gameId));
+            }}
+            onLaunchInstalled={(deviceId, packageName) => {
+              if (selectedIds.has(deviceId)) {
+                const source = devices.find((device) => device.id === deviceId);
+                const gameName = source?.installedApps.find((app) => app.packageName === packageName)?.name ?? packageName;
+                return launchBulk(deviceId, gameName, (targetId) => launchInstalledApp(key, targetId, packageName));
+              }
+              return runCardAction(deviceId, () => launchInstalledApp(key, deviceId, packageName));
+            }}
             onMapInstalled={(deviceId, packageName, name, metaAppId) =>
               runCardAction(deviceId, () => mapInstalledApp(key, deviceId, packageName, name, metaAppId))
             }
             onStartSession={(deviceId, minutes) => {
               // null is the Unlimited button; only a typed length can be wrong.
-              if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1)) {
+              if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60)) {
                 // The very answer the server gives such a length; worded with the other errors.
                 setCardErrors((prev) => ({ ...prev, [deviceId]: new ApiError(400, "invalid session body") }));
                 return Promise.resolve({});
               }
+              if (selectedIds.has(deviceId)) return startBulkSession(deviceId, minutes);
               return runCardAction(deviceId, () => startSession(key, deviceId, minutes));
             }}
             onExtend={(sessionId, minutes) => runCardAction(d.id, () => extendSession(key, sessionId, minutes))}
