@@ -59,6 +59,14 @@ interface AgentStrings {
     val saveAndConnect: String
     val cancel: String
 
+    val auto: String
+    val manual: String
+    val notFoundYet: String
+    val findServer: String
+    val findingServer: String
+    val pickServer: String
+    val noServerFound: String
+
     val notificationChannel: String
     val notificationTitle: String
     val notificationText: String
@@ -103,6 +111,14 @@ object EnglishStrings : AgentStrings {
     override val metaAppId = "Meta App ID"
     override val saveAndConnect = "Save and connect"
     override val cancel = "Cancel"
+
+    override val auto = "Auto"
+    override val manual = "Manual"
+    override val notFoundYet = "Not found yet"
+    override val findServer = "Find server"
+    override val findingServer = "Searching…"
+    override val pickServer = "Several servers answered. Pick the café PC:"
+    override val noServerFound = "No server found. Is this headset on the café PC's Wi-Fi? Is UDP port 3000 open in the PC's firewall?"
 
     override val notificationChannel = "CafeQuest agent"
     override val notificationTitle = "CafeQuest agent running"
@@ -151,6 +167,14 @@ object TurkishStrings : AgentStrings {
     override val metaAppId = "Meta App ID"
     override val saveAndConnect = "Kaydet ve bağlan"
     override val cancel = "İptal"
+
+    override val auto = "Otomatik"
+    override val manual = "Manuel"
+    override val notFoundYet = "Henüz bulunamadı"
+    override val findServer = "Sunucuyu bul"
+    override val findingServer = "Aranıyor…"
+    override val pickServer = "Birden fazla sunucu yanıt verdi. Kafe bilgisayarını seçin:"
+    override val noServerFound = "Sunucu bulunamadı. Gözlük, kafe bilgisayarıyla aynı Wi-Fi ağında mı? Bilgisayarın güvenlik duvarında UDP 3000 portu açık mı?"
 
     override val notificationChannel = "CafeQuest servisi"
     override val notificationTitle = "CafeQuest çalışıyor"

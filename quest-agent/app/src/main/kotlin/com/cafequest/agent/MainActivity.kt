@@ -113,8 +113,8 @@ fun Screens(
     val diagnostics by AgentRuntime.diagnostics.state.collectAsState()
     LaunchedEffect(Unit) {
         identity = store.load()
-        // Opening CafeQuest connects. With the baked-in setup defaults this means a
-        // freshly installed headset needs no typing at all: install, open, online.
+        // Opening CafeQuest connects. In Auto (the default) the agent finds the café PC
+        // itself, so a freshly installed headset needs no typing at all: install, open, online.
         onStartService(AgentService.ACTION_RECONFIGURE)
     }
     // Back leaves setup without saving instead of closing the app.
@@ -171,7 +171,9 @@ fun DiagnosticsScreen(
         ctx.startForegroundService(Intent(ctx, AgentService::class.java).setAction(action))
         Unit
     }
-    val link = linkStatus(diagnostics.connection, identity?.serverHost, identity?.serverPort, s)
+    // The service publishes where it dials (Auto may have moved it); before that, the saved setup.
+    val server = diagnostics.server ?: identity?.serverTarget()
+    val link = linkStatus(diagnostics.connection, server?.host, server?.port, s)
 
     val status: @Composable () -> Unit = {
         Panel(rail = link.tone.color()) {
@@ -182,7 +184,7 @@ fun DiagnosticsScreen(
     }
     val facts: @Composable () -> Unit = {
         Panel {
-            Fact(s.server) { FactText(identity?.let { "${it.serverHost}:${it.serverPort}" } ?: "…") }
+            Fact(s.server) { FactText(server?.let { serverSummary(it, s) } ?: "…") }
             Fact(s.battery) {
                 val battery = diagnostics.battery
                 if (battery == null) FactText("…") else BatteryGauge(battery.level, battery.charging)
@@ -237,11 +239,17 @@ fun DiagnosticsScreen(
 @Composable
 fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> Unit, onCancel: () -> Unit) {
     val s = LocalStrings.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var name by remember(identity) { mutableStateOf(identity?.deviceName ?: "") }
+    var mode by remember(identity) { mutableStateOf(identity?.serverMode ?: ServerMode.AUTO) }
     var host by remember(identity) { mutableStateOf(identity?.serverHost ?: "") }
-    var port by remember(identity) { mutableStateOf(identity?.serverPort?.toString() ?: "3000") }
+    var port by remember(identity) { mutableStateOf((identity?.serverPort ?: DEFAULT_SERVER_PORT).toString()) }
     var meta by remember(identity) { mutableStateOf(identity?.metaAppId?.takeUnless { it == UNCONFIGURED_APP_ID } ?: "") }
+    // Find server: null = not searched yet. A pick is applied by Save and connect, like every other field.
+    var found by remember(identity) { mutableStateOf<List<FoundServer>?>(null) }
+    var picked by remember(identity) { mutableStateOf<FoundServer?>(null) }
+    var searching by remember { mutableStateOf(false) }
     Panel {
         Text(s.setupTitle, style = MaterialTheme.typography.headlineSmall)
         Text(
@@ -250,19 +258,66 @@ fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> U
             color = CqColors.ChalkDim,
         )
         SetupField(s.deviceName, name) { name = it }
-        SetupField(s.serverHost, host) { host = it }
-        SetupField(s.serverPort, port, KeyboardType.Number) { port = it }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(s.server, style = MaterialTheme.typography.bodyLarge)
+            TwoWaySwitch(
+                options = ServerMode.entries,
+                current = mode,
+                description = s.server,
+                label = { if (it == ServerMode.AUTO) s.auto else s.manual },
+                onPick = { mode = it },
+            )
+        }
+        if (mode == ServerMode.AUTO) {
+            // What Auto dials after Save: the pick, else what Auto found before (a Manual setup found nothing).
+            val shown = picked?.let { ServerTarget(it.name, it.host, it.port, ServerMode.AUTO) }
+                ?: identity?.takeIf { it.serverMode == ServerMode.AUTO }?.serverTarget()
+            Text(
+                shown?.let { serverSummary(it, s) } ?: s.notFoundYet,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            SecondaryAction(if (searching) s.findingServer else s.findServer) {
+                if (searching) return@SecondaryAction
+                searching = true
+                scope.launch {
+                    val results = ServerDiscovery({ wifiBroadcastTargets(context) }).search()
+                    found = results
+                    results.singleOrNull()?.let { picked = it }
+                    searching = false
+                }
+            }
+            val answers = found
+            if (answers != null && answers.isEmpty()) {
+                Text(s.noServerFound, style = MaterialTheme.typography.bodyMedium, color = CqColors.Alert)
+            }
+            if (answers != null && answers.size > 1) {
+                Text(s.pickServer, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
+                answers.forEach { server ->
+                    SecondaryAction(serverSummary(ServerTarget(server.name, server.host, server.port, ServerMode.AUTO), s)) {
+                        picked = server
+                    }
+                }
+            }
+        } else {
+            SetupField(s.serverHost, host) { host = it }
+            SetupField(s.serverPort, port, KeyboardType.Number) { port = it }
+        }
         SetupField(s.metaAppId, meta, KeyboardType.Number) { meta = it }
         Spacer(Modifier.height(4.dp))
         PrimaryAction(s.saveAndConnect) {
             scope.launch {
                 store.save(AgentSetupInput(
                     deviceName = name,
-                    // Until the Auto | Manual switch lands, the typed host is what the agent dials.
-                    serverMode = ServerMode.MANUAL,
+                    serverMode = mode,
                     serverHost = host,
                     serverPort = port,
                     metaAppId = meta,
+                    picked = picked,
                 ))
                 onSaved()
             }
@@ -276,27 +331,46 @@ fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> U
 /** EN | TR, the same two-way switch as the dashboard header; the pressed side is live. */
 @Composable
 private fun LanguageSwitch(current: AgentLanguage, onPick: (AgentLanguage) -> Unit) {
-    val label = LocalStrings.current.language
+    TwoWaySwitch(
+        options = AgentLanguage.entries,
+        current = current,
+        description = LocalStrings.current.language,
+        label = { it.code.uppercase() },
+        onPick = onPick,
+    )
+}
+
+/** A segmented switch drawn like the dashboard header's EN | TR; the pressed side is live. */
+@Composable
+private fun <T> TwoWaySwitch(
+    options: List<T>,
+    current: T,
+    description: String,
+    label: (T) -> String,
+    onPick: (T) -> Unit,
+) {
     Row(
         Modifier
             .border(1.dp, CqColors.Rail, RoundedCornerShape(8.dp))
             .padding(2.dp)
-            .semantics { contentDescription = label }
+            .semantics { contentDescription = description }
             .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        AgentLanguage.entries.forEach { language ->
-            val picked = language == current
+        options.forEach { option ->
+            val picked = option == current
             Box(
                 Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (picked) CqColors.Raised else Color.Transparent)
-                    .selectable(selected = picked, role = Role.RadioButton, onClick = { onPick(language) })
-                    .size(width = 56.dp, height = 44.dp),
+                    .selectable(selected = picked, role = Role.RadioButton, onClick = { onPick(option) })
+                    .height(44.dp)
+                    .widthIn(min = 56.dp)
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    language.code.uppercase(),
+                    label(option),
                     style = MaterialTheme.typography.labelLarge,
                     color = if (picked) CqColors.Chalk else CqColors.ChalkDim,
                 )

@@ -21,6 +21,17 @@ fun linkStatus(
     }
 }
 
+/**
+ * The server line on the diagnostics and setup screens: "CAFE-PC · 192.168.1.150:3000 · Auto".
+ * The PC name shows only in Auto (it is what Auto stays with); before Auto finds anything, "Not found yet".
+ */
+fun serverSummary(target: ServerTarget, strings: AgentStrings): String {
+    if (target.host.isBlank()) return strings.notFoundYet
+    val mode = if (target.mode == ServerMode.AUTO) strings.auto else strings.manual
+    val name = target.name?.takeIf { target.mode == ServerMode.AUTO }
+    return listOfNotNull(name, "${target.host}:${target.port}", mode).joinToString(" · ")
+}
+
 /** The diagnostics' raw result ("SUCCESS", "FAILED <code>", "—") in the app's language; codes stay as sent. */
 fun displayResult(raw: String, strings: AgentStrings): String = when {
     raw == "SUCCESS" -> strings.success

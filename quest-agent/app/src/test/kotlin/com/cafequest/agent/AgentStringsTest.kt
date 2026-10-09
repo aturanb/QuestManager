@@ -50,4 +50,15 @@ class AgentStringsTest {
         assertEquals("Sunucu aranıyor…", searching.word)
         assertEquals("Kafe bilgisayarı bu Wi-Fi ağında aranıyor.", searching.caption)
     }
+
+    @Test
+    fun serverLineSpeaksTurkish() {
+        val tr = AgentLanguage.TR.strings
+        assertEquals(
+            "CAFE-PC · 192.168.1.150:3000 · Otomatik",
+            serverSummary(ServerTarget("CAFE-PC", "192.168.1.150", 3000, ServerMode.AUTO), tr),
+        )
+        assertEquals("192.168.1.77:3000 · Manuel", serverSummary(ServerTarget("CAFE-PC", "192.168.1.77", 3000, ServerMode.MANUAL), tr))
+        assertEquals("Henüz bulunamadı", serverSummary(ServerTarget(null, "", 3000, ServerMode.AUTO), tr))
+    }
 }

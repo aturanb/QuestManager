@@ -48,4 +48,30 @@ class HeadsetStatusTest {
         assertEquals("Looking for the café PC on this Wi-Fi.", status.caption)
         assertEquals(LinkTone.WAITING, status.tone)
     }
+
+    @Test
+    fun serverLineNamesTheCafePcInAuto() {
+        assertEquals(
+            "CAFE-PC · 192.168.1.150:3000 · Auto",
+            serverSummary(ServerTarget("CAFE-PC", "192.168.1.150", 3000, ServerMode.AUTO), EnglishStrings),
+        )
+        // Upgraded from 0.2.0: the saved host works but no PC name was learned yet.
+        assertEquals(
+            "192.168.1.150:3000 · Auto",
+            serverSummary(ServerTarget(null, "192.168.1.150", 3000, ServerMode.AUTO), EnglishStrings),
+        )
+    }
+
+    @Test
+    fun serverLineInManualShowsOnlyTheTypedAddress() {
+        assertEquals(
+            "192.168.1.77:3000 · Manual",
+            serverSummary(ServerTarget("CAFE-PC", "192.168.1.77", 3000, ServerMode.MANUAL), EnglishStrings),
+        )
+    }
+
+    @Test
+    fun serverLineBeforeAutoFindsAnything() {
+        assertEquals("Not found yet", serverSummary(ServerTarget(null, "", 3000, ServerMode.AUTO), EnglishStrings))
+    }
 }
