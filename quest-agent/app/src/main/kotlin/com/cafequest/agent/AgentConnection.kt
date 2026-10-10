@@ -36,6 +36,7 @@ class AgentConnection(
     private val foregroundAppReader: ForegroundAppReader = AndroidForegroundAppReader(context),
     private val discovery: ServerDiscovery = ServerDiscovery({ wifiBroadcastTargets(context) }),
     private val casting: CastingController? = null,
+    private val controllerMonitoring: ControllerMonitoringController? = null,
 ) : ManagedAgentConnection {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
@@ -193,7 +194,10 @@ class AgentConnection(
                     // Signaling is already serialized by the controller's mutex.
                     is ParsedServerMessage.CastSignal -> scope.launch { casting?.onSignal(message.message) }
                     is ParsedServerMessage.CastStop -> casting?.onStop(message.message)
-                    is ParsedServerMessage.ControllerMonitoring -> Unit
+                    // A failure here must never reach the connection loop.
+                    is ParsedServerMessage.ControllerMonitoring ->
+                        runCatching { controllerMonitoring?.apply(message.message.enabled) }
+                            .onFailure { Log.w(LOG_TAG, "controller monitoring apply failed: ${it.message}") }
                     null -> Unit
                 }
             }
@@ -268,6 +272,7 @@ class AgentConnection(
                 accessGranted = usageSnapshot.accessGranted,
                 foregroundApp = foregroundApp,
             ),
+            wirelessDebugging = runCatching { controllerMonitoring?.wireState() }.getOrNull(),
         )
         try { ws.send(protocolJson.encodeToString(tel)) } catch (_: Exception) { }
     }

@@ -28,6 +28,7 @@ class AgentService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var connections: AgentConnectionSupervisor
     private lateinit var casting: CastingController
+    private lateinit var controllerMonitoring: ControllerMonitoringController
     /** Whether the foreground service is currently carrying the projection type. */
     private var projectionForeground = false
 
@@ -41,6 +42,10 @@ class AgentService : Service() {
         casting = CastingController(
             publisherFactory = WebRtcPublisherFactory(AndroidRtcPeerFactory(this), CastVideoProfile.SUPPORT),
             store = AgentRuntime.casting,
+        )
+        controllerMonitoring = ControllerMonitoringController(
+            settings = AndroidSecureSettings(this),
+            store = PrefsControllerMonitoringStore(this),
         )
         val consentPrompts = CastConsentPromptGate(
             prompt = { sessionId -> startConsentActivity(CastConsentActivity.intent(this, sessionId)) },
@@ -57,6 +62,7 @@ class AgentService : Service() {
                 packageLauncher,
                 AgentRuntime.diagnostics,
                 casting = casting,
+                controllerMonitoring = controllerMonitoring,
             ).also { Log.i(LOG_TAG, "agent connection configured for ${identity.deviceName}") }
         }
         // The foreground type follows the session: mediaProjection only while one is live.

@@ -13,6 +13,10 @@
     <!-- Managed Quest fleet: ADB grants this app-op so an admin cast request can
          surface the system consent activity while a customer app is in front. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Optional controller-battery diagnostics: lets the agent switch Horizon OS
+         Wireless Debugging on for the server. Grant once per headset with
+         `adb shell pm grant com.cafequest.agent android.permission.WRITE_SECURE_SETTINGS`. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <application
         android:label="CafeQuest"
