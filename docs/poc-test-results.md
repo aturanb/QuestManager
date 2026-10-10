@@ -38,12 +38,20 @@ the new path could be responsible for any reading.
 
 Observed, not failures:
 
-- After the switch is turned on, the first poll runs before the headset's TLS
-  service is up, so the card can show *Couldn't connect to the headset over ADB*
-  for up to one poll interval (about 60 s) before the first reading arrives.
-- The same wait follows an **Allow** tap: the card keeps showing *Tap Allow on
-  the headset to turn on Wireless Debugging* for up to about 60 s after the
-  person has already tapped it, until the next poll.
+- After the switch was turned on, or after an **Allow** tap, the card kept a
+  failure hint (*Couldn't connect to the headset over ADB* / *Tap Allow on the
+  headset…*) for up to one poll interval (about 60 s) before the first reading,
+  because the poll ran before the headset advertised its TLS port. **Fixed**:
+  an agent's first report of Wireless Debugging `on` now triggers one early poll
+  about 2 s later (`pollSoon`). Re-measured on the Quest 3 after the fix:
+  switch on → first reading in about 5 s (was about 55 s), with the hint showing
+  for about 1 s on the way.
+- **Open, found while re-measuring:** Horizon OS switches Wireless Debugging off
+  by itself when the headset's Wi-Fi network changes (logcat: *Detected wifi
+  network change. Disabling adbwifi.*). The agent asks only once per boot, so it
+  does not turn it back on and readings stop until the switch is cycled or the
+  headset reboots; the card then says *Tap Allow…* although no dialog is
+  pending. Not fixed or covered by a test.
 - The agent records ownership of Wireless Debugging when it *asks*, not when the
   person approves. After a denied or timed-out dialog in the same boot, a
   setting that staff then enabled by hand would be switched off when monitoring

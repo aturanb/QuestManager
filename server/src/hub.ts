@@ -261,7 +261,13 @@ export class Hub {
       setExpectedGame(this.db, deviceId, msg.expectedCurrentGame);
       // Advisory UI hint only; guard on the socket so a replaced connection's late frame is ignored.
       const conn = this.devices.get(deviceId);
-      if (conn && conn.socket === socket) conn.wirelessDebugging = msg.wirelessDebugging ?? null;
+      if (conn && conn.socket === socket) {
+        const previous = conn.wirelessDebugging;
+        conn.wirelessDebugging = msg.wirelessDebugging ?? null;
+        // The headset needs a moment to advertise its port: poll soon instead of
+        // leaving a failure hint on the card until the next interval.
+        if (conn.wirelessDebugging === "on" && previous !== "on") this.controllerBattery?.pollSoon();
+      }
       this.log.debug({ device: deviceId, battery: msg.battery.level }, "telemetry");
     } else if (msg.type === "installed_apps") {
       const apps = msg.apps.filter((app) => !isIgnoredPackage(app.packageName));

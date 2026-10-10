@@ -55,6 +55,8 @@ export type AdbRunner = (
 export interface ControllerBatteryView {
   monitoringState(): ControllerBatteryMonitoringState;
   deviceState(deviceId: string): DeviceControllerBattery | null;
+  /** Re-poll shortly (no-op while monitoring is off); see ControllerBatteryCollector.pollSoon. */
+  pollSoon(): void;
 }
 
 /** Wireless ADB listens on 5555 after `adb tcpip 5555` (per-headset setup). */
@@ -65,6 +67,8 @@ const DUMP_TIMEOUT_MS = 5_000;
 /** dumpsys OVRRemoteService is ~20 KB; cap the pipe so one odd device cannot grow it. */
 const MAX_OUTPUT_BYTES = 512 * 1024;
 const MDNS_TIMEOUT_MS = 3_000;
+/** The headset needs a moment after Wireless Debugging turns on before it advertises its port. */
+const DEFAULT_SETTLE_MS = 2_000;
 const MDNS_TLS_SERVICE = "_adb-tls-connect._tcp";
 const MDNS_LEGACY_SERVICE = "_adb._tcp";
 
@@ -219,6 +223,8 @@ export type ControllerBatteryCollectorOptions = {
   targets: () => readonly CollectorTarget[];
   now: () => Date;
   pollIntervalMs: number;
+  /** Delay before an early re-poll; tests shorten it. */
+  settleMs?: number;
   onChange: () => void;
 };
 
@@ -238,6 +244,8 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
   /** Bumped by stop/disable so an in-flight cycle cannot publish afterwards. */
   private generation = 0;
   private stopped = false;
+  /** A pending early re-poll (see pollSoon); at most one. */
+  private soonTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: ControllerBatteryCollectorOptions) {}
 
@@ -279,6 +287,7 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
         clearInterval(this.timer);
         this.timer = null;
       }
+      this.clearSoon();
       this.readings.clear();
       const pending = this.inFlight;
       await this.disconnectOwned();
@@ -303,6 +312,33 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
     return cycle;
   }
 
+  /**
+   * Poll once more shortly: an agent just reported Wireless Debugging as on, but
+   * the headset needs a moment to advertise its port, and waiting out the poll
+   * interval leaves a failure hint on the card for up to a minute. Repeated calls
+   * coalesce, it never runs while monitoring is off, and it queues behind a cycle
+   * already running (that one may have started before the port existed).
+   */
+  pollSoon(): void {
+    if (this.stopped || !this.enabled || this.soonTimer) return;
+    this.soonTimer = setTimeout(() => {
+      this.soonTimer = null;
+      void this.pollAfterRunning().catch(() => undefined);
+    }, this.options.settleMs ?? DEFAULT_SETTLE_MS);
+  }
+
+  private async pollAfterRunning(): Promise<void> {
+    if (this.inFlight) await this.inFlight.catch(() => undefined);
+    await this.pollNow();
+  }
+
+  private clearSoon(): void {
+    if (this.soonTimer) {
+      clearTimeout(this.soonTimer);
+      this.soonTimer = null;
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     this.enabled = false;
@@ -311,6 +347,7 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.clearSoon();
     this.readings.clear();
     const pending = this.inFlight;
     await pending?.catch(() => undefined);

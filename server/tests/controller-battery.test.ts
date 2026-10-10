@@ -174,7 +174,9 @@ class FakeAdb {
   }
 }
 
-function harness(overrides: Partial<{ targets: () => readonly CollectorTarget[]; pollIntervalMs: number }> = {}) {
+function harness(
+  overrides: Partial<{ targets: () => readonly CollectorTarget[]; pollIntervalMs: number; settleMs: number }> = {}
+) {
   const adb = new FakeAdb();
   let clockMs = Date.parse("2026-10-09T12:00:00.000Z");
   const changes = { count: 0 };
@@ -185,6 +187,7 @@ function harness(overrides: Partial<{ targets: () => readonly CollectorTarget[];
     targets,
     now: () => new Date(clockMs),
     pollIntervalMs: overrides.pollIntervalMs ?? 60_000,
+    ...(overrides.settleMs !== undefined ? { settleMs: overrides.settleMs } : {}),
     onChange: () => {
       changes.count += 1;
     },
@@ -540,5 +543,52 @@ test("a stale reading keeps its values and takes the actionable reason when the 
   assert.equal(state?.status, "stale");
   assert.equal(state?.reason, "wireless_debugging_off");
   assert.equal(state?.left?.level, 100);
+  await h.collector.setEnabled(false);
+});
+
+// --- pollSoon: re-poll shortly after an agent reports Wireless Debugging on ---
+
+test("pollSoon runs one extra cycle after the settle delay and coalesces repeated calls", async () => {
+  const h = harness({ settleMs: 25 });
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  const before = h.adb.count("connect");
+  h.collector.pollSoon();
+  h.collector.pollSoon();
+  h.collector.pollSoon();
+  assert.equal(h.adb.count("connect"), before, "nothing runs before the settle delay");
+  await wait(120);
+  assert.equal(h.adb.count("connect"), before + 1, "one cycle, however many calls");
+  await h.collector.setEnabled(false);
+});
+
+test("pollSoon does nothing while monitoring is off, and switching off cancels a pending one", async () => {
+  const h = harness({ settleMs: 25 });
+  h.collector.pollSoon();
+  await wait(80);
+  assert.deepEqual(h.adb.calls, [], "off means no adb process at all");
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  h.collector.pollSoon();
+  await h.collector.setEnabled(false);
+  const afterDisable = h.adb.calls.length;
+  await wait(80);
+  assert.equal(h.adb.calls.length, afterDisable, "the pending poll died with the switch");
+});
+
+test("pollSoon waits for a cycle that is already running and then runs a fresh one", async () => {
+  const h = harness({ settleMs: 10 });
+  let release!: () => void;
+  h.adb.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await h.collector.setEnabled(true); // the first cycle starts and is held at the dump
+  h.collector.pollSoon();
+  await wait(60); // the timer has fired and is waiting behind the running cycle
+  assert.equal(h.adb.count("connect"), 1, "still only the first cycle");
+  h.adb.gate = null;
+  release();
+  await wait(120);
+  assert.equal(h.adb.count("connect"), 2, "a fresh cycle ran once the first one finished");
   await h.collector.setEnabled(false);
 });

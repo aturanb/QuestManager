@@ -11,10 +11,13 @@ const ADMIN = "monitoring-frames-key-123";
 const CAPABLE = ["launch_android_package", "controller_monitoring_v1"];
 
 let connectFails = true;
+/** Every endpoint the collector tried to connect to, in order. */
+const connectLog: string[] = [];
 const runner: AdbRunner = async (_executable, args) => {
   const [command] = args;
   if (command === "version") return { stdout: "Android Debug Bridge version 1.0.41\n", stderr: "" };
   if (command === "connect") {
+    connectLog.push(args[1] ?? "");
     if (connectFails) throw new Error("adb connect failed");
     return { stdout: `connected to ${args[1] ?? ""}\n`, stderr: "" };
   }
@@ -26,7 +29,7 @@ const { app, db, hub, controllerBatteryCollector } = await buildApp({
   port: 0,
   host: "127.0.0.1",
   adminApiKey: ADMIN,
-  controllerBattery: { adbPath: "adb", runner, pollIntervalMs: 60_000 },
+  controllerBattery: { adbPath: "adb", runner, pollIntervalMs: 60_000, settleMs: 20 },
 });
 await app.listen({ port: 0, host: "127.0.0.1" });
 const address = app.server.address();
@@ -163,4 +166,36 @@ test("an unknown wirelessDebugging value never blocks telemetry or liveness", as
     !hub.controllerBatteryTargets().find((t) => t.deviceId === id)?.wirelessDebugging,
     "the unknown value is dropped, not stored"
   );
+});
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test("an agent reporting Wireless Debugging on triggers an early poll, once per transition", async () => {
+  connectFails = false;
+  await putMonitoring(true);
+  const { id, socket } = connect(CAPABLE, "192.168.1.75");
+  const polled = () => connectLog.filter((endpoint) => endpoint.startsWith("192.168.1.75:")).length;
+  hub.handleAgentMessage(id, socket as never, telemetry(id, { wirelessDebugging: "off" }));
+  await freshCycle();
+  const base = polled();
+  hub.handleAgentMessage(id, socket as never, telemetry(id, { wirelessDebugging: "on" }));
+  await wait(150);
+  assert.equal(polled(), base + 1, "the off to on report polled this headset soon after");
+  hub.handleAgentMessage(id, socket as never, telemetry(id, { wirelessDebugging: "on" }));
+  await wait(150);
+  assert.equal(polled(), base + 1, "an unchanged report does not poll again");
+  connectFails = true;
+  await putMonitoring(false);
+});
+
+test("a Wireless Debugging report while monitoring is off polls nothing", async () => {
+  await putMonitoring(false);
+  const { id, socket } = connect(CAPABLE, "192.168.1.76");
+  const before = connectLog.length;
+  hub.handleAgentMessage(id, socket as never, telemetry(id, { wirelessDebugging: "off" }));
+  hub.handleAgentMessage(id, socket as never, telemetry(id, { wirelessDebugging: "on" }));
+  await wait(150);
+  assert.equal(connectLog.length, before);
 });

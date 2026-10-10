@@ -142,7 +142,11 @@ wireless ADB, off by default:
   `_adb-tls-connect._tcp`, then `_adb._tcp`, then `<ip>:5555`. Only plain IPv4
   `ip:port` values from that listing can become an argument.
 - **Cadence**: immediately after enabling, then once per minute, one cycle at a
-  time, at most one ADB operation per headset.
+  time, at most one ADB operation per headset. When an agent first reports
+  Wireless Debugging `on`, one early cycle runs about 2 s later (`pollSoon`:
+  coalesced, cancelled by switching off, queued behind a cycle already running),
+  because the headset needs a moment to advertise its port and the card would
+  otherwise show a failure hint until the next interval.
 - **Ownership**: only endpoints whose `adb connect` said it *newly* connected
   them are disconnected again when monitoring is turned off or the server
   exits. A session owned by another tool (`already connected`) is read but never

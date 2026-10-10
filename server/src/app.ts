@@ -55,7 +55,13 @@ export type AppConfig = {
   /** UDP port answering headset discovery probes (DISCOVERY_PORT from index.ts); unset = off, tests opt in with 0. */
   discoveryPort?: number;
   /** Optional controller-battery collector overrides; tests inject a fake runner. */
-  controllerBattery?: { adbPath?: string; runner?: AdbRunner; now?: () => Date; pollIntervalMs?: number };
+  controllerBattery?: {
+    adbPath?: string;
+    runner?: AdbRunner;
+    now?: () => Date;
+    pollIntervalMs?: number;
+    settleMs?: number;
+  };
   logger?: { level?: string; stream?: NodeJS.WritableStream };
 };
 
@@ -100,6 +106,7 @@ export async function buildApp(cfg: AppConfig) {
     targets: () => hub.controllerBatteryTargets(),
     now: cfg.controllerBattery?.now ?? (() => new Date()),
     pollIntervalMs: cfg.controllerBattery?.pollIntervalMs ?? CONTROLLER_BATTERY_POLL_MS,
+    ...(cfg.controllerBattery?.settleMs !== undefined ? { settleMs: cfg.controllerBattery.settleMs } : {}),
     onChange: () => hub.pushDashboardState(),
   });
   hub.setControllerBatteryView(controllerBatteryCollector);
