@@ -18,11 +18,15 @@ import {
 import {
   LAUNCH_ANDROID_PACKAGE_CAPABILITY,
   SCREEN_CAST_CAPABILITY,
+  CONTROLLER_MONITORING_CAPABILITY,
+  PROTOCOL_VERSION,
   parseAgentMessage,
   type AgentCapability,
+  type ControllerMonitoring,
   type ServerCastMessage,
   type ServerCommand,
   type ServerError,
+  type WirelessDebuggingState,
 } from "@cafequest/shared";
 import type { AppCatalog } from "./catalog.js";
 import { isIgnoredPackage, resolveInstalledApp } from "./installed-apps.js";
@@ -44,6 +48,8 @@ type DeviceConn = {
   capabilities: ReadonlySet<AgentCapability>;
   /** Normalized LAN IPv4 of the socket, in memory only; null when not pollable. */
   remoteAddress: string | null;
+  /** The agent's last reported Horizon OS Wireless Debugging state; in memory only. */
+  wirelessDebugging: WirelessDebuggingState | null;
 };
 type LaunchTarget =
   | { gameId: string; name: string; metaAppId: string; packageName?: never }
@@ -119,7 +125,12 @@ export class Hub {
 
   /** Live connection addresses for the optional ADB collector; never persisted. */
   controllerBatteryTargets(): readonly CollectorTarget[] {
-    return [...this.devices.values()].map((conn) => ({ deviceId: conn.deviceId, address: conn.remoteAddress }));
+    return [...this.devices.values()].map((conn) => ({
+      deviceId: conn.deviceId,
+      address: conn.remoteAddress,
+      // Present only once the agent has reported one: absent means "unknown".
+      ...(conn.wirelessDebugging ? { wirelessDebugging: conn.wirelessDebugging } : {}),
+    }));
   }
 
   addAgentSocket(
@@ -141,12 +152,17 @@ export class Hub {
       }
       this.log.warn({ device: deviceId }, "duplicate connection replaced");
     }
-    this.devices.set(deviceId, {
+    const conn: DeviceConn = {
       socket,
       deviceId,
       capabilities: new Set(capabilities),
       remoteAddress: normalizeRemoteIpv4(remoteAddress),
-    });
+      wirelessDebugging: null,
+    };
+    this.devices.set(deviceId, conn);
+    // A reconnecting agent learns the current flag at once, so a server restart
+    // or a toggle made while it was offline still reaches it.
+    this.sendControllerMonitoring(conn, this.controllerBattery?.monitoringState().enabled ?? false);
     this.onDeviceChanged();
     this.pushDashboardState();
   }
@@ -170,6 +186,23 @@ export class Hub {
     } catch {
       return false;
     }
+  }
+
+  /** One monitoring frame to one agent that advertised the capability; false if not sent. */
+  private sendControllerMonitoring(conn: DeviceConn, enabled: boolean): boolean {
+    if (!conn.capabilities.has(CONTROLLER_MONITORING_CAPABILITY)) return false;
+    const frame: ControllerMonitoring = { type: "controller_monitoring", protocolVersion: PROTOCOL_VERSION, enabled };
+    try {
+      conn.socket.send(JSON.stringify(frame));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Tell every connected capable agent the monitoring flag (called when the switch flips). */
+  broadcastControllerMonitoring(enabled: boolean): void {
+    for (const conn of this.devices.values()) this.sendControllerMonitoring(conn, enabled);
   }
 
   removeAgentSocket(deviceId: string, socket: WebSocket): void {
@@ -226,6 +259,9 @@ export class Hub {
           : {}),
       });
       setExpectedGame(this.db, deviceId, msg.expectedCurrentGame);
+      // Advisory UI hint only; guard on the socket so a replaced connection's late frame is ignored.
+      const conn = this.devices.get(deviceId);
+      if (conn && conn.socket === socket) conn.wirelessDebugging = msg.wirelessDebugging ?? null;
       this.log.debug({ device: deviceId, battery: msg.battery.level }, "telemetry");
     } else if (msg.type === "installed_apps") {
       const apps = msg.apps.filter((app) => !isIgnoredPackage(app.packageName));

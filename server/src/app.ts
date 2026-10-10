@@ -259,13 +259,17 @@ export async function buildApp(cfg: AppConfig) {
   });
 
   // --- REST: settings ----------------------------------------------------------
-  // The global controller-battery switch. It controls CafeQuest's own ADB
-  // collection only: it never enables or disables Horizon OS Wireless Debugging.
+  // The global controller-battery switch. Turning it on tells each capable agent
+  // to enable Horizon OS Wireless Debugging (the person taps Allow on the headset
+  // once per boot); turning it off tells them to switch it back off where they
+  // enabled it. CafeQuest's own ADB reads start and stop with it.
   app.put("/api/settings/controller-battery-monitoring", async (req, reply) => {
     const body = z.object({ enabled: z.boolean() }).strict().safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "invalid_setting_body" });
     // Persist the intent first: a failed ADB start must not lose the choice.
     setControllerBatteryMonitoringEnabled(db, body.data.enabled);
+    // Agents act on the flag immediately; they do not wait for ADB to be probed.
+    hub.broadcastControllerMonitoring(body.data.enabled);
     await controllerBatteryCollector.setEnabled(body.data.enabled);
     app.log.info({ enabled: body.data.enabled }, "controller battery monitoring changed");
     hub.pushDashboardState();
