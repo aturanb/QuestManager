@@ -127,11 +127,15 @@
   application API. A Horizon OS update that changes that text produces
   "controller batteries unavailable", never a broken headset; the feature is
   off by default and optional.
-- **Wireless ADB is per-headset and per-boot**: someone must run
-  `adb tcpip 5555` over USB once (and again after a reboot, an IP change, or an
-  OS update). The dashboard switch does **not** enable or disable Horizon OS
-  Wireless Debugging, and it cannot fix a headset that stopped listening. When
-  it stops listening, only controller readings are lost.
+- **Wireless Debugging needs one tap per reboot**: Horizon OS resets it on every
+  boot and forgets the "always allow on this network" approval, so after a
+  reboot someone taps **Allow** on the system dialog (the agent itself does not
+  autostart, so this is the same visit as opening CafeQuest). The approval is
+  per access point. The one-time per-headset setup is the `pm grant
+  ... WRITE_SECURE_SETTINGS` step and USB authorization of the café PC's adb
+  key. mDNS discovery is verified on macOS only; on another café PC the
+  `<ip>:5555` fallback still works for headsets that have legacy `adb tcpip`.
+  When a headset cannot be reached, only controller readings are lost.
 - **Controller readings are never stored**: they live in the server's memory and
   are gone after a restart, so a fresh reading is required every time. The only
   persisted value is the global enabled flag.

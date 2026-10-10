@@ -108,8 +108,12 @@ socket's normalized LAN IPv4) and held only in memory — a restart shows no sta
 readings. ADB failures only ever change controller state, never liveness,
 sessions, or launches; only endpoints CafeQuest newly connected are disconnected
 on disable. `execFile` takes argv, never a shell string, and no raw ADB output,
-stderr, or controller serial reaches an API response or a log. The dashboard
-switch does not enable/disable Horizon OS Wireless Debugging.
+stderr, or controller serial reaches an API response or a log. Turning the
+switch on makes each capable agent enable Horizon OS Wireless
+Debugging itself (`controller_monitoring` frame, one-time `WRITE_SECURE_SETTINGS`
+grant, at most one request per boot, switched off again only where the agent
+turned it on); the collector finds the random TLS port with `adb mdns
+services`, falling back to `<ip>:5555`.
 
 Two code paths reach the internet, both via `catalog-refresh.ts`:
 `npm run catalog:update` and `POST /api/catalog/refresh` (the dashboard's

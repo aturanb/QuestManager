@@ -98,11 +98,15 @@ levels of connected headsets over wireless ADB and shows compact `L 100%` /
 so a changed format only ever means "controller batteries unavailable" — never a
 broken headset.
 
-It needs one optional per-headset step (docs/quest-setup.md): connect USB,
-`adb tcpip 5555`, then unplug. The Quest may stop listening after a reboot, an
-IP change, or an OS update, and the dashboard switch does not change Wireless
-Debugging inside Horizon OS — it only stops or starts CafeQuest's own ADB reads.
-Nothing about this feature can affect online status, sessions, or game
+It needs two one-time steps per headset (docs/quest-setup.md): grant the agent
+`WRITE_SECURE_SETTINGS` over USB, and authorize the café PC's adb key (the USB
+"Always allow" prompt). With the switch on, the agent turns Horizon OS Wireless
+Debugging on by itself and the server finds the port over mDNS, so there is no
+`adb tcpip` and no USB after a reboot. After a headset reboot, open CafeQuest
+and tap **Allow** once on the "Allow wireless debugging on this network?"
+dialog. A headset that already has `adb tcpip 5555` running keeps working.
+Turning the switch off turns Wireless Debugging back off where CafeQuest turned
+it on. Nothing about this feature can affect online status, sessions, or game
 launching, and controller readings are never stored: they live in memory and
 are refreshed after every server start.
 

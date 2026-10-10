@@ -1,5 +1,38 @@
 # CafeQuest POC Results
 
+## Agent-enabled Wireless Debugging, 2026-10-10
+
+Quest model: Quest 3 (adb serial `2G0YC5ZG8106W2`), Horizon OS on Android 14.
+
+### Hardware findings (these decided the design)
+
+| Attempt | Result | Notes |
+|---|---|---|
+| Agent app runs `dumpsys OVRRemoteService`, `DUMP` granted | FAIL | `PERMISSION_DENIED` from Meta's service even inside the real app process; no SELinux denial logged |
+| Other app-readable channels | FAIL | No controller `power_supply` node, `dumpsys externalbattery` empty, no input battery monitor |
+| `adb shell setprop persist.adb.tcp.port 5555` | FAIL | `SELinux permission check failed` (`shell` may not set it on this build) |
+| `adb_wifi_enabled` left on across a reboot | FAIL | Reset to 0; the "always allow on this network" approval was also lost |
+| `settings put global adb_wifi_enabled 1` from the shell, network untrusted | PASS | Raises the "Allow wireless debugging on this network?" dialog; value reads 0 until approved |
+| Agent app with `WRITE_SECURE_SETTINGS` sets `adb_wifi_enabled=1`, network trusted | PASS | `before=0 putOk=true after=1`, TLS service appears in `adb mdns services` |
+| `adb connect` to the mDNS `_adb-tls-connect._tcp` endpoint with no `adb pair` | PASS | The key already authorized over USB is accepted; `dumpsys` returned Left/Right levels |
+| App reading the TLS port (`service.adb.tls.port`) | FAIL | Empty for an app; the server must discover it over mDNS |
+| Trust scope | Observed | Stored per access point (BSSID), not per network name; the headset roamed to a second BSSID and asked again |
+
+### Physical check of the implemented feature
+
+Run after Tasks 1-7 are built and the APK is installed
+(`adb install -r quest-agent/app/build/outputs/apk/debug/app-debug.apk`).
+
+| Check | Result | Notes |
+|---|---|---|
+| Grant `WRITE_SECURE_SETTINGS`, turn the switch on, tap Allow, readings appear with no `tcpip` | NOT TESTED | |
+| Reboot, open CafeQuest, tap Allow, readings return | NOT TESTED | |
+| Deny the dialog: card shows the pending reason and reconnects do not re-prompt | NOT TESTED | |
+| Switch off: Wireless Debugging turns off on a headset where the agent enabled it | NOT TESTED | |
+| Switch off with Wireless Debugging enabled by hand: it stays on | NOT TESTED | |
+| Run without the grant: card shows *One-time setup missing on this headset* | NOT TESTED | |
+| Headset with legacy `adb tcpip 5555` and Wireless Debugging off still shows readings | NOT TESTED | |
+
 ## Optional controller batteries, 2026-10-09
 
 Quest model: Quest 3 (adb serial `2G0YC5ZG8106W2`), Horizon OS on Android 14

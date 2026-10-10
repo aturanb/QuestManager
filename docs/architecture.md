@@ -128,6 +128,19 @@ wireless ADB, off by default:
   a shell (arguments are always argv through `execFile`), and loopback/IPv6/
   malformed values are simply not pollable (`no_wireless_address`). No serial
   number enters the protocol or the database.
+- **Enabling ADB**: the agent, not the server, turns Horizon OS Wireless
+  Debugging on. The server sends `controller_monitoring {enabled}` (capability
+  `controller_monitoring_v1`) at every agent hello and whenever the switch
+  flips; the agent writes `Settings.Global adb_wifi_enabled` using a one-time
+  `WRITE_SECURE_SETTINGS` grant, asks at most once per boot, and switches it off
+  again only if it turned it on. It reports `wirelessDebugging`
+  (`on|off|not_permitted`) in telemetry; the server uses it only to explain a
+  connect that already failed (`wireless_debugging_off`,
+  `agent_permission_missing`).
+- **Endpoint discovery**: the TLS port is random per enable and unreadable by an
+  app, so each cycle runs one `adb mdns services` and picks, per headset IP,
+  `_adb-tls-connect._tcp`, then `_adb._tcp`, then `<ip>:5555`. Only plain IPv4
+  `ip:port` values from that listing can become an argument.
 - **Cadence**: immediately after enabling, then once per minute, one cycle at a
   time, at most one ADB operation per headset.
 - **Ownership**: only endpoints whose `adb connect` said it *newly* connected
@@ -144,9 +157,8 @@ wireless ADB, off by default:
   REST/WebSocket payloads, the logs, or SQLite.
 
 `ADB_PATH` (optional, see `.env.example`) points at a specific `adb` when it is
-not on `PATH`. The dashboard switch does not enable or disable Wireless
-Debugging on the headsets; that stays a device-side setup step
-(docs/quest-setup.md).
+not on `PATH`. The one-time per-headset setup (the `pm grant` and the USB adb
+authorization) is in docs/quest-setup.md.
 
 ## Server discovery
 

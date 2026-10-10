@@ -98,25 +98,32 @@ dashboard, and the view ends by itself if the browser closes, the Wi-Fi drops,
 ## Optional: controller batteries
 
 Reading the Touch controller levels is optional and separate from normal setup.
-Per headset, once (and again after a reboot, an IP change, or an OS update):
+Per headset, once:
 
 ```bash
-# 1. Connect the headset by USB and authorize debugging.
+# 1. Connect the headset by USB and, if asked, tick "Always allow from this
+#    computer" for the café PC's adb key (authorize debugging).
 adb devices
-# 2. Enable TCP ADB for the current boot.
-adb tcpip 5555
-# 3. Unplug USB and confirm the headset is reachable over the LAN.
-adb connect <headset-ip>:5555
+# 2. Let the agent switch Wireless Debugging on for the server.
+adb shell pm grant com.cafequest.agent android.permission.WRITE_SECURE_SETTINGS
 ```
 
-Then turn on **Controller batteries** in the dashboard header. Each card shows
-`L`/`R` badges next to the headset battery; a controller that is asleep or
-otherwise inactive keeps its percentage and is labelled `last known`.
+Then turn on **Controller batteries** in the dashboard header. The agent asks
+Horizon OS to enable Wireless Debugging; on the headset, tap **Allow** (choose
+always allow for this network) when the "Allow wireless debugging on this
+network?" dialog appears. The first enable after every headset reboot shows it
+again, and the agent does not autostart after a reboot, so the visit is the same
+one you already make to open CafeQuest. Each card then shows `L`/`R` badges next
+to the headset battery; a controller that is asleep or otherwise inactive keeps
+its percentage and is labelled `last known`.
 
-Restrict inbound TCP 5555 to the café PC on the trusted café LAN. This is
-diagnostics, not a management or security boundary, and the dashboard switch
-only starts or stops CafeQuest's own ADB reads — it does not enable or disable
-Wireless Debugging inside Horizon OS.
+Notes: the approval is stored per access point, so a headset that roams between
+access points asks again at each new one. The dialog is a system panel and can
+appear in front of a game, so turn the switch on while headsets are idle. The
+legacy path still works: a headset with `adb tcpip 5555` running is read
+without Wireless Debugging. Wireless Debugging is a LAN-reachable ADB listener
+that accepts only already-authorized keys, which is within this project's
+LAN-only model; it is on only while the switch is on.
 
 ## Diagnostics controls
 
@@ -168,8 +175,14 @@ Wireless Debugging inside Horizon OS.
 - **Controller badges show *No wireless ADB address***: the headset's agent is
   not connected, or it connected from a loopback/IPv6 address. Reconnect the
   headset.
-- **Controller badges show *Couldn't connect to the headset over ADB***: TCP ADB
-  is off for this boot (the Quest drops it after a reboot or an OS update). Run
-  `adb tcpip 5555` again over USB.
+- **Controller badges show *Couldn't connect to the headset over ADB***: neither
+  Wireless Debugging nor legacy TCP ADB is reachable. Make sure the switch is
+  on and the headset's agent is connected; if the agent has not asked yet, open
+  CafeQuest on the headset.
+- **A card says *Tap Allow on the headset to turn on Wireless Debugging***: the
+  agent asked and the system dialog is waiting. Put the headset on and tap
+  **Allow** (always allow for this network).
+- **A card says *One-time setup missing on this headset***: run the
+  `pm grant ... WRITE_SECURE_SETTINGS` step above over USB.
 - **Badges say *last known***: that controller is asleep. The percentage is the
   last one Horizon OS reported, not live data.
