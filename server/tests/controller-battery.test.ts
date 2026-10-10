@@ -6,6 +6,7 @@ import {
   ControllerBatteryCollector,
   normalizeRemoteIpv4,
   parseControllerBatteryDump,
+  parseMdnsServices,
   type AdbRunner,
   type CollectorTarget,
 } from "../src/controller-battery.js";
@@ -121,6 +122,8 @@ class FakeAdb {
   connectThrows = false;
   dumpImpl: (endpoint: string) => string = () => FIXTURE;
   dumpThrows = false;
+  mdnsImpl: () => string = () => "";
+  mdnsThrows = false;
   /** When set, every dump waits for it, letting tests observe overlapping cycles. */
   gate: Promise<void> | null = null;
   private activeDumps = 0;
@@ -151,6 +154,10 @@ class FakeAdb {
       } finally {
         this.activeDumps -= 1;
       }
+    }
+    if (command === "mdns") {
+      if (this.mdnsThrows) throw new Error("adb mdns failed");
+      return { stdout: this.mdnsImpl(), stderr: "" };
     }
     if (command === "disconnect") {
       return { stdout: `disconnected ${args[1] ?? ""}\n`, stderr: "" };
@@ -403,4 +410,135 @@ test("stopping during a poll publishes nothing afterwards", async () => {
   assert.deepEqual(h.collector.monitoringState(), { enabled: false, availability: "disabled" });
   assert.equal(h.collector.deviceState("dev-1"), null);
   assert.equal(h.changes.count, before, "no dashboard push after stop");
+});
+
+// --- agent-enabled Wireless Debugging: endpoint discovery and reasons ------
+
+const MDNS_REAL = [
+  "List of discovered mdns services",
+  "adb-2G0YC5ZG8106W2-OgB7Wc\t_adb-tls-connect._tcp\t192.168.1.109:40911",
+  "adb-2G0YC5ZG8106W2\t_adb._tcp\t192.168.1.109:5555",
+  "",
+].join("\n");
+
+test("parseMdnsServices keeps the TLS and legacy endpoint per headset address", () => {
+  const found = parseMdnsServices(MDNS_REAL);
+  assert.deepEqual([...found.entries()], [["192.168.1.109", { tls: "192.168.1.109:40911", legacy: "192.168.1.109:5555" }]]);
+});
+
+test("parseMdnsServices ignores pairing services, headers, and anything that is not a plain IPv4:port", () => {
+  const found = parseMdnsServices(
+    [
+      "List of discovered mdns services",
+      "adb-x\t_adb-tls-pairing._tcp\t192.168.1.30:37123",
+      "adb-x\t_adb._tcp\t192.168.1.31;reboot:5555",
+      "adb-x\t_adb._tcp\t127.0.0.1:5555",
+      "adb-x\t_adb._tcp\t[fe80::1]:5555",
+      "adb-x\t_adb._tcp\t192.168.1.32:99999",
+      "adb-x\t_adb._tcp\t192.168.1.33:0",
+      "adb-x\t_adb._tcp\t192.168.1.34:abc",
+      "adb-x _adb._tcp 192.168.1.35; reboot:5555",
+      "garbage",
+      "",
+    ].join("\n")
+  );
+  assert.equal(found.size, 0);
+});
+
+test("the TLS endpoint is preferred, and one mdns call serves every headset in the cycle", async () => {
+  const h = harness({
+    targets: () => [
+      { deviceId: "dev-1", address: "192.168.1.109" },
+      { deviceId: "dev-2", address: "192.168.1.110" },
+    ],
+  });
+  h.adb.mdnsImpl = () => MDNS_REAL;
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  const argv = h.adb.argv();
+  assert.ok(argv.includes("/opt/platform-tools/adb connect 192.168.1.109:40911"), "TLS endpoint wins");
+  assert.ok(argv.some((line) => line.includes("-s 192.168.1.109:40911 shell dumpsys OVRRemoteService")));
+  assert.ok(argv.includes("/opt/platform-tools/adb connect 192.168.1.110:5555"), "unlisted headset falls back to 5555");
+  assert.equal(h.adb.count("mdns"), 1, "discovery runs once per cycle, not per headset");
+  await h.collector.setEnabled(false);
+});
+
+test("a headset advertising only the legacy service uses that port", async () => {
+  const h = harness();
+  h.adb.mdnsImpl = () => "adb-x\t_adb._tcp\t192.168.1.109:5556\n";
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  assert.ok(h.adb.argv().includes("/opt/platform-tools/adb connect 192.168.1.109:5556"));
+  await h.collector.setEnabled(false);
+});
+
+test("a failing mdns call never fails the cycle: the 5555 guess still reads the headset", async () => {
+  const h = harness();
+  h.adb.mdnsThrows = true;
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  assert.ok(h.adb.argv().includes("/opt/platform-tools/adb connect 192.168.1.109:5555"));
+  assert.equal(h.collector.deviceState("dev-1")?.status, "available");
+  await h.collector.setEnabled(false);
+});
+
+test("hostile mdns text never reaches an adb argument", async () => {
+  const h = harness();
+  h.adb.mdnsImpl = () => "adb-x\t_adb._tcp\t192.168.1.109;reboot:5555\nadb-y _adb._tcp 192.168.1.109; rm -rf /:5555\n";
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  assert.ok(!h.adb.argv().some((line) => line.includes(";")), "no argument carries mdns-supplied shell text");
+  assert.ok(h.adb.argv().includes("/opt/platform-tools/adb connect 192.168.1.109:5555"));
+  await h.collector.setEnabled(false);
+});
+
+test("a headset with no wireless address causes no mdns call at all", async () => {
+  const h = harness({ targets: () => [{ deviceId: "dev-1", address: null }] });
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  assert.equal(h.adb.count("mdns"), 0);
+  await h.collector.setEnabled(false);
+});
+
+test("a failed connect is explained by what the agent reported, and only then", async () => {
+  const cases: Array<[CollectorTarget["wirelessDebugging"], string]> = [
+    ["off", "wireless_debugging_off"],
+    ["not_permitted", "agent_permission_missing"],
+    ["on", "adb_connect_failed"],
+    [undefined, "adb_connect_failed"],
+  ];
+  for (const [reported, reason] of cases) {
+    const h = harness({ targets: () => [{ deviceId: "dev-1", address: "192.168.1.109", wirelessDebugging: reported }] });
+    h.adb.connectThrows = true;
+    await h.collector.setEnabled(true);
+    await h.collector.pollNow();
+    assert.equal(h.collector.deviceState("dev-1")?.reason, reason, String(reported));
+    await h.collector.setEnabled(false);
+  }
+});
+
+test("a headset readable through legacy tcpip shows readings even while Wireless Debugging reads off", async () => {
+  const h = harness({ targets: () => [{ deviceId: "dev-1", address: "192.168.1.109", wirelessDebugging: "off" }] });
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  const state = h.collector.deviceState("dev-1");
+  assert.equal(state?.status, "available");
+  assert.equal(state?.reason, null);
+  await h.collector.setEnabled(false);
+});
+
+test("a stale reading keeps its values and takes the actionable reason when the agent says off", async () => {
+  let reported: CollectorTarget["wirelessDebugging"] = "on";
+  const h = harness({ targets: () => [{ deviceId: "dev-1", address: "192.168.1.109", wirelessDebugging: reported }] });
+  await h.collector.setEnabled(true);
+  await h.collector.pollNow();
+  assert.equal(h.collector.deviceState("dev-1")?.status, "available");
+  h.adb.connectThrows = true;
+  reported = "off";
+  await h.collector.pollNow();
+  const state = h.collector.deviceState("dev-1");
+  assert.equal(state?.status, "stale");
+  assert.equal(state?.reason, "wireless_debugging_off");
+  assert.equal(state?.left?.level, 100);
+  await h.collector.setEnabled(false);
 });

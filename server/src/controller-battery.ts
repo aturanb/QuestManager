@@ -8,6 +8,7 @@
 // serial numbers never leave this module — callers only ever see the bounded
 // status/reason values below.
 import { execFile } from "node:child_process";
+import type { WirelessDebuggingState } from "@cafequest/shared";
 
 export type ControllerBatterySide = { level: number; state: "active" | "inactive" };
 
@@ -16,6 +17,8 @@ export type ControllerBatteryReason =
   | "headset_offline"
   | "no_wireless_address"
   | "adb_connect_failed"
+  | "wireless_debugging_off"
+  | "agent_permission_missing"
   | "dump_failed"
   | "parse_failed";
 
@@ -32,8 +35,15 @@ export type ControllerBatteryMonitoringState = {
   availability: "disabled" | "ready" | "adb_unavailable" | "no_devices";
 };
 
-/** One live agent connection: where its socket came from, if it is pollable. */
-export type CollectorTarget = { deviceId: string; address: string | null };
+/**
+ * One live agent connection: where its socket came from, if it is pollable, and
+ * what its Horizon OS Wireless Debugging looked like at the last telemetry.
+ */
+export type CollectorTarget = {
+  deviceId: string;
+  address: string | null;
+  wirelessDebugging?: WirelessDebuggingState;
+};
 
 export type AdbRunner = (
   executable: string,
@@ -54,6 +64,9 @@ const CONNECT_TIMEOUT_MS = 5_000;
 const DUMP_TIMEOUT_MS = 5_000;
 /** dumpsys OVRRemoteService is ~20 KB; cap the pipe so one odd device cannot grow it. */
 const MAX_OUTPUT_BYTES = 512 * 1024;
+const MDNS_TIMEOUT_MS = 3_000;
+const MDNS_TLS_SERVICE = "_adb-tls-connect._tcp";
+const MDNS_LEGACY_SERVICE = "_adb._tcp";
 
 /** Never serialized: the reason codes above are the public contract. */
 class AdbCommandError extends Error {}
@@ -102,6 +115,46 @@ export function normalizeRemoteIpv4(address: string | undefined): string | null 
   const [first] = octets as [number, ...number[]];
   if (first === 0 || first === 127) return null;
   return octets.join(".");
+}
+
+/** Wireless ADB endpoints a headset advertises over mDNS, keyed by its IPv4. */
+export type MdnsEndpoints = Map<string, { tls?: string; legacy?: string }>;
+
+/**
+ * Parse `adb mdns services`. Only the two connectable ADB service types are
+ * kept, and only when the endpoint is a plain IPv4 with a numeric port, so
+ * nothing else in the output can ever become an argument to `adb`.
+ */
+export function parseMdnsServices(raw: string): MdnsEndpoints {
+  const found: MdnsEndpoints = new Map();
+  for (const line of raw.split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length !== 3) continue;
+    const service = parts[1];
+    const endpoint = parts[2] ?? "";
+    if (service !== MDNS_TLS_SERVICE && service !== MDNS_LEGACY_SERVICE) continue;
+    const split = endpoint.lastIndexOf(":");
+    if (split === -1) continue;
+    const ip = normalizeRemoteIpv4(endpoint.slice(0, split));
+    const portText = endpoint.slice(split + 1);
+    if (!ip || !/^\d{1,5}$/.test(portText)) continue;
+    const port = Number(portText);
+    if (port < 1 || port > 65_535) continue;
+    const entry = found.get(ip) ?? {};
+    if (service === MDNS_TLS_SERVICE) {
+      if (!entry.tls) entry.tls = `${ip}:${port}`;
+    } else if (!entry.legacy) {
+      entry.legacy = `${ip}:${port}`;
+    }
+    found.set(ip, entry);
+  }
+  return found;
+}
+
+/** TLS Wireless Debugging first, then a legacy tcpip service, then the 5555 guess. */
+function endpointFor(address: string, endpoints: MdnsEndpoints): string {
+  const found = endpoints.get(address);
+  return found?.tls ?? found?.legacy ?? `${address}:${ADB_TCP_PORT}`;
 }
 
 /** Comma-separated `Key: value` fields of one summary line, keys de-duplicated. */
@@ -279,9 +332,14 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
       this.options.onChange();
       return;
     }
+    // One mDNS listing serves every headset; skipped when nobody is pollable.
+    const endpoints: MdnsEndpoints = targets.some((target) => target.address)
+      ? await this.discoverEndpoints()
+      : new Map();
+    if (generation !== this.generation) return;
     // Headsets are polled concurrently; each device still runs one operation at
     // a time because a cycle is single-flight.
-    await Promise.all(targets.map((target) => this.collectDevice(target, generation)));
+    await Promise.all(targets.map((target) => this.collectDevice(target, generation, endpoints)));
     if (generation !== this.generation) return;
     this.options.onChange();
   }
@@ -297,13 +355,13 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
     return unique;
   }
 
-  private async collectDevice(target: CollectorTarget, generation: number): Promise<void> {
+  private async collectDevice(target: CollectorTarget, generation: number, endpoints: MdnsEndpoints): Promise<void> {
     if (generation !== this.generation) return;
     if (!target.address) {
       this.recordFailure(target.deviceId, "no_wireless_address", generation);
       return;
     }
-    const endpoint = `${target.address}:${ADB_TCP_PORT}`;
+    const endpoint = endpointFor(target.address, endpoints);
     try {
       const connected = await this.options.runner(
         this.options.adbPath,
@@ -312,14 +370,14 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
       );
       const text = `${connected.stdout}\n${connected.stderr}`.toLowerCase();
       if (!text.includes("connected to") || /\b(failed|cannot|unable|refused)\b/.test(text)) {
-        this.recordFailure(target.deviceId, "adb_connect_failed", generation);
+        this.recordFailure(target.deviceId, this.connectFailureReason(target), generation);
         return;
       }
       // "already connected to X" belongs to whoever connected it (another tool,
       // an earlier session, USB): CafeQuest must not disconnect that.
       if (!text.includes("already connected")) this.owned.add(endpoint);
     } catch {
-      this.recordFailure(target.deviceId, "adb_connect_failed", generation);
+      this.recordFailure(target.deviceId, this.connectFailureReason(target), generation);
       return;
     }
 
@@ -367,6 +425,27 @@ export class ControllerBatteryCollector implements ControllerBatteryView {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Why a connect failed, in the words the agent's own report allows. Only
+   * consulted after a real failure, so a headset readable through legacy tcpip
+   * never earns a Wireless Debugging hint merely because the setting is off.
+   */
+  private connectFailureReason(target: CollectorTarget): ControllerBatteryReason {
+    if (target.wirelessDebugging === "not_permitted") return "agent_permission_missing";
+    if (target.wirelessDebugging === "off") return "wireless_debugging_off";
+    return "adb_connect_failed";
+  }
+
+  /** mDNS is a discovery aid only: without it the legacy 5555 guess still works. */
+  private async discoverEndpoints(): Promise<MdnsEndpoints> {
+    try {
+      const listing = await this.options.runner(this.options.adbPath, ["mdns", "services"], MDNS_TIMEOUT_MS);
+      return parseMdnsServices(listing.stdout);
+    } catch {
+      return new Map();
     }
   }
 
