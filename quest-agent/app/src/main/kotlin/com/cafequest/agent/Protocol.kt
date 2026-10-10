@@ -6,6 +6,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonClassDiscriminator
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -14,6 +16,7 @@ const val PROTOCOL_VERSION = 1
 const val LOG_TAG = "CafeQuest"
 const val CAPABILITY_LAUNCH_ANDROID_PACKAGE = "launch_android_package"
 const val CAPABILITY_SCREEN_CAST = "screen_cast_v1"
+const val CAPABILITY_CONTROLLER_MONITORING = "controller_monitoring_v1"
 
 /** Mirrors shared MAX_CAST_SDP_CHARS / MAX_CAST_ICE_CANDIDATE_CHARS. */
 const val MAX_CAST_SDP_CHARS = 65_536
@@ -34,7 +37,11 @@ data class Hello(
     val deviceName: String,
     val deviceModel: String,
     val agentVersion: String,
-    val capabilities: List<String> = listOf(CAPABILITY_LAUNCH_ANDROID_PACKAGE, CAPABILITY_SCREEN_CAST),
+    val capabilities: List<String> = listOf(
+        CAPABILITY_LAUNCH_ANDROID_PACKAGE,
+        CAPABILITY_SCREEN_CAST,
+        CAPABILITY_CONTROLLER_MONITORING,
+    ),
 )
 
 @Serializable
@@ -62,6 +69,8 @@ data class Telemetry(
     val agent: AgentState,
     val expectedCurrentGame: ExpectedGame? = null,
     val usage: UsageState? = null,
+    /** "on" | "off" | "not_permitted"; advisory only (mirrors shared WirelessDebuggingSchema). */
+    val wirelessDebugging: String? = null,
 )
 
 @Serializable
@@ -246,12 +255,20 @@ data class CastStopMessage(
     val reason: String,
 )
 
+@Serializable
+data class ControllerMonitoringMessage(
+    val type: String = "controller_monitoring",
+    val protocolVersion: Int = PROTOCOL_VERSION,
+    val enabled: Boolean,
+)
+
 /** One parsed inbound server frame; distinct variants keep directions explicit. */
 sealed interface ParsedServerMessage {
     data class Launch(val command: ServerCommand) : ParsedServerMessage
     data class CastRequest(val message: CastRequestMessage) : ParsedServerMessage
     data class CastSignal(val message: ServerCastSignalMessage) : ParsedServerMessage
     data class CastStop(val message: CastStopMessage) : ParsedServerMessage
+    data class ControllerMonitoring(val message: ControllerMonitoringMessage) : ParsedServerMessage
 }
 
 private val CAST_UUID_RE =
@@ -288,6 +305,13 @@ fun parseServerMessage(raw: String): ParsedServerMessage? {
             val message = runCatching { protocolJson.decodeFromString<CastStopMessage>(raw) }.getOrNull() ?: return null
             if (!isCastSessionId(message.sessionId) || message.reason !in CastStopReason.ALL) return null
             ParsedServerMessage.CastStop(message)
+        }
+        "controller_monitoring" -> {
+            // A quoted "true" or a number is not a boolean on this wire.
+            val enabled = element["enabled"] as? JsonPrimitive
+            if (enabled == null || enabled.isString) return null
+            val value = enabled.booleanOrNull ?: return null
+            ParsedServerMessage.ControllerMonitoring(ControllerMonitoringMessage(enabled = value))
         }
         else -> null
     }

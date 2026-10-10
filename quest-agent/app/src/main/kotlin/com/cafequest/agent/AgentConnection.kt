@@ -193,6 +193,7 @@ class AgentConnection(
                     // Signaling is already serialized by the controller's mutex.
                     is ParsedServerMessage.CastSignal -> scope.launch { casting?.onSignal(message.message) }
                     is ParsedServerMessage.CastStop -> casting?.onStop(message.message)
+                    is ParsedServerMessage.ControllerMonitoring -> Unit
                     null -> Unit
                 }
             }

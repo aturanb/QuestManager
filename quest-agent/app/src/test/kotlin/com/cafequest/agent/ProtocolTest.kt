@@ -15,12 +15,15 @@ class ProtocolTest {
         assertFalse(json.contains("enrollmentKey"))
     }
 
-    @Test fun `the default hello advertises package launch and screen cast exactly once`() {
+    @Test fun `the default hello advertises package launch, screen cast and controller monitoring exactly once`() {
         val json = protocolJson.encodeToString(
             Hello(deviceId = "d", deviceName = "Quest 01", deviceModel = "Quest 3", agentVersion = "0.5.0")
         )
-        assertTrue(json.contains("\"capabilities\":[\"launch_android_package\",\"screen_cast_v1\"]"))
+        assertTrue(
+            json.contains("\"capabilities\":[\"launch_android_package\",\"screen_cast_v1\",\"controller_monitoring_v1\"]")
+        )
         assertEquals(1, Regex(Regex.escape(CAPABILITY_SCREEN_CAST)).findAll(json).count())
+        assertEquals(1, Regex(Regex.escape(CAPABILITY_CONTROLLER_MONITORING)).findAll(json).count())
     }
 
     @Test fun `explicit screen cast capability serializes beside package launch`() {
@@ -174,5 +177,48 @@ class ProtocolTest {
         assertTrue(json.contains("\"type\":\"installed_apps\""))
         assertTrue(json.contains("\"packageName\":\"com.TriangleFactory.Breachers\""))
         assertTrue(json.contains("\"versionCode\":42"))
+    }
+
+    @Test fun `parseServerMessage reads a controller monitoring frame`() {
+        val on = parseServerMessage("""{"type":"controller_monitoring","protocolVersion":1,"enabled":true}""")
+        assertTrue(on is ParsedServerMessage.ControllerMonitoring)
+        assertTrue((on as ParsedServerMessage.ControllerMonitoring).message.enabled)
+        val off = parseServerMessage("""{"type":"controller_monitoring","protocolVersion":1,"enabled":false}""")
+        assertFalse((off as ParsedServerMessage.ControllerMonitoring).message.enabled)
+    }
+
+    @Test fun `parseServerMessage rejects malformed monitoring frames`() {
+        for (raw in listOf(
+            """{"type":"controller_monitoring","protocolVersion":1}""",
+            """{"type":"controller_monitoring","protocolVersion":1,"enabled":"true"}""",
+            """{"type":"controller_monitoring","protocolVersion":1,"enabled":1}""",
+            """{"type":"controller_monitoring","protocolVersion":1,"enabled":null}""",
+            """{"type":"controller_monitoring","protocolVersion":2,"enabled":true}""",
+            """{"type":"controller_monitoring","enabled":true}""",
+        )) {
+            assertNull(raw, parseServerMessage(raw))
+        }
+    }
+
+    @Test fun `telemetry carries wirelessDebugging and omits it when unset`() {
+        val withState = protocolJson.encodeToString(
+            Telemetry(
+                deviceId = "d",
+                timestamp = "2026-10-10T00:00:00Z",
+                battery = Battery(80, false),
+                agent = AgentState(true),
+                wirelessDebugging = "off",
+            )
+        )
+        assertTrue(withState.contains("\"wirelessDebugging\":\"off\""))
+        val without = protocolJson.encodeToString(
+            Telemetry(
+                deviceId = "d",
+                timestamp = "2026-10-10T00:00:00Z",
+                battery = Battery(80, false),
+                agent = AgentState(true),
+            )
+        )
+        assertFalse(without.contains("wirelessDebugging"))
     }
 }
