@@ -56,6 +56,72 @@ export function upsertDevice(db: Db, input: NewDeviceInput): DeviceRow {
   return getDevice(db, input.id) as DeviceRow;
 }
 
+/**
+ * Move a legacy install-scoped device row to its stable Android-scoped id.
+ * If an older server already inserted the stable row, combine the two records
+ * so server-first and agent-first rollouts both converge without a stale card.
+ */
+export function rekeyDevice(db: Db, previousId: string, stableId: string): boolean {
+  if (previousId === stableId || !getDevice(db, previousId)) return false;
+
+  return db.transaction(() => {
+    if (getDevice(db, stableId)) {
+      // The new agent may have reached an older server first. Keep that row's
+      // recent telemetry but restore the legacy row's staff-assigned name and
+      // original enrollment dates before combining their history.
+      db.prepare(
+        `UPDATE devices SET
+           name = (SELECT name FROM devices WHERE id = ?),
+           first_seen_at = COALESCE((SELECT first_seen_at FROM devices WHERE id = ?), first_seen_at),
+           created_at = (SELECT created_at FROM devices WHERE id = ?)
+         WHERE id = ?`
+      ).run(previousId, previousId, previousId, stableId);
+      db.prepare(
+        `DELETE FROM device_apps
+         WHERE device_id = ? AND package_name IN (
+           SELECT package_name FROM device_apps WHERE device_id = ?
+         )`
+      ).run(previousId, stableId);
+
+      // Agent-first rollout can leave both rows with an active session. Prefer
+      // the session already attached to the stable row and retain the legacy
+      // one as stopped history so one headset never has two active sessions.
+      const stableHasActiveSession = db
+        .prepare("SELECT 1 FROM sessions WHERE device_id = ? AND status = 'active' LIMIT 1")
+        .get(stableId);
+      if (stableHasActiveSession) {
+        const stoppedAt = nowIso();
+        db.prepare(
+          `UPDATE sessions
+           SET status = 'stopped',
+               ends_at = CASE WHEN open_ended = 1 THEN ? ELSE ends_at END,
+               updated_at = ?
+           WHERE device_id = ? AND status = 'active'`
+        ).run(stoppedAt, stoppedAt, previousId);
+      }
+    } else {
+      db.prepare(
+        `INSERT INTO devices (
+           id, name, model, agent_version, last_seen_at, first_seen_at,
+           battery_level, charging, expected_game_id, expected_game_name,
+           expected_game_started_at, usage_access_granted, foreground_package_name,
+           foreground_started_at, created_at, updated_at
+         )
+         SELECT ?, name, model, agent_version, last_seen_at, first_seen_at,
+           battery_level, charging, expected_game_id, expected_game_name,
+           expected_game_started_at, usage_access_granted, foreground_package_name,
+           foreground_started_at, created_at, updated_at
+         FROM devices WHERE id = ?`
+      ).run(stableId, previousId);
+    }
+    db.prepare("UPDATE sessions SET device_id = ? WHERE device_id = ?").run(stableId, previousId);
+    db.prepare("UPDATE commands SET device_id = ? WHERE device_id = ?").run(stableId, previousId);
+    db.prepare("UPDATE device_apps SET device_id = ? WHERE device_id = ?").run(stableId, previousId);
+    db.prepare("DELETE FROM devices WHERE id = ?").run(previousId);
+    return true;
+  })();
+}
+
 function mapDevice(r: any): DeviceRow {
   return {
     id: r.id,
@@ -285,14 +351,22 @@ export function activeSessionForDevice(db: Db, deviceId: string): SessionRow | n
 }
 
 /**
- * Latest session shown on the dashboard; stopped sessions clear the card,
- * except an unlimited one, which stays until the next session so staff can
- * read the time to charge.
+ * Latest session shown on the dashboard. If migrated stopped history is newer
+ * than a surviving active session, show the active one; otherwise stopped timed
+ * sessions clear the card and stopped unlimited sessions keep their played time.
  */
 export function dashboardSessionForDevice(db: Db, deviceId: string): SessionRow | null {
   const r = db
     .prepare(`SELECT * FROM sessions WHERE device_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`)
     .get(deviceId) as any;
+  if (r?.status === "stopped") {
+    const active = db
+      .prepare(
+        `SELECT * FROM sessions WHERE device_id = ? AND status = 'active' ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      )
+      .get(deviceId) as any;
+    if (active) return mapSession(active);
+  }
   const shown = r && (r.status === "active" || r.status === "expired" || (r.status === "stopped" && r.open_ended));
   return shown ? mapSession(r) : null;
 }

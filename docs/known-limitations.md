@@ -12,6 +12,16 @@
   sessions, commands and app inventory, but a headset that still runs the agent
   comes back on its next hello. A connected headset is refused with 409
   `headset_online`.
+- **Stable headset identity follows Android's scope**: clearing app data or
+  reinstalling keeps the same card only for the same device user and APK
+  signing key. A factory reset, different user, or differently signed APK gets
+  a new ID. Stale cards created before this migration cannot be paired safely
+  and need one manual removal.
+- **Renames sync only to agents 0.7.0 and newer**: an older agent neither
+  receives `device_name` nor can send a typed name, so its screen keeps its own
+  name; rename it on the dashboard, which is the name that counts. If staff
+  rename on the dashboard and on the headset while the headset is offline, the
+  headset's typed name wins when it reconnects.
 - **Session countdown** is client-rendered from server time; a closed laptop
   lid pauses it until the next state push.
 - **Simulator battery** drains 1%/5s tick; not a real discharge model.

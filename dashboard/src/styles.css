@@ -225,6 +225,10 @@ code {
 .bay-select input { width: 20px; height: 20px; margin: 0; accent-color: var(--ready); cursor: pointer; }
 .action-scope { color: var(--ready); font-size: 0.8125rem; font-weight: 650; }
 .bay-head h2 { font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
+.rename-btn { margin-left: 12px; }
+.rename-btn:hover { color: var(--chalk); }
+.rename-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.rename-form input { flex: 1 1 9rem; min-width: 0; }
 .link-state { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--chalk-dim); white-space: nowrap; }
 .link-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
 .bay[data-online="true"] .link-state::before { background: var(--ready); }

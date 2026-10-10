@@ -169,6 +169,13 @@ Discovery is a separate, smaller pair: `shared/src/discovery.ts` (UDP 3000,
 - **Duplicate connections**: newest hello wins; the old socket gets
   `DUPLICATE_DEVICE` then close 4001. A valid hello also refreshes
   `last_seen_at`, otherwise the sweep drops reconnects before first telemetry.
+- **Device name**: the server owns it. It sends `device_name` (capability
+  `device_name_v1`) after every accepted hello and on each dashboard rename.
+  Only `hello.deviceNameSetByStaff: true` (a name typed on the headset and not
+  yet echoed back) may rename an existing row, so a reinstall's default
+  "Quest XXXX" never overwrites "Quest 01". The agent keeps a pending typed
+  name over a differing server name, and its setup field starts from the
+  server's latest name.
 - **Sessions**: server clock is authoritative (`remaining = endsAt - serverTime`,
   dashboard corrects skew with `serverTime - Date.now()`). Expiry never touches
   the headset. Unlimited sessions (`minutes: null`) report `endsAt: null` while

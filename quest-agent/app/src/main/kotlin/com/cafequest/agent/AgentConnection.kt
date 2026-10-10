@@ -58,6 +58,8 @@ class AgentConnection(
     @Volatile private var socket: WebSocket? = null
     @Volatile private var running = false
     @Volatile private var managedPackages: Set<String> = emptySet()
+    /** The identity with any name the server has assigned since this connection started. */
+    @Volatile private var current: AgentIdentity = identity
     private var attempt = 0
 
     /**
@@ -91,6 +93,7 @@ class AgentConnection(
         if (running) return
         running = true
         diagnostics.setServer(locator.target)
+        diagnostics.setDeviceName(identity.deviceName)
         scope.launch { loop() }
         scope.launch { telemetryLoop() }
     }
@@ -155,9 +158,9 @@ class AgentConnection(
             override fun onOpen(ws: WebSocket, response: Response) {
                 attempt = 0 // §25: reset backoff after successful connection
                 diagnostics.setConnection(ConnState.CONNECTED)
-                val hello = Hello(
-                    deviceId = identity.deviceId,
-                    deviceName = identity.deviceName,
+                // The latest name, not the one this connection started with: a rename
+                // received on an earlier socket must not be undone by a reconnect.
+                val hello = current.toHello(
                     deviceModel = android.os.Build.MODEL ?: "Quest",
                     agentVersion = BuildConfig.VERSION_NAME,
                 )
@@ -198,6 +201,7 @@ class AgentConnection(
                     is ParsedServerMessage.ControllerMonitoring ->
                         runCatching { controllerMonitoring?.apply(message.message.enabled) }
                             .onFailure { Log.w(LOG_TAG, "controller monitoring apply failed: ${it.message}") }
+                    is ParsedServerMessage.DeviceName -> scope.launch { adoptServerName(message.message.name) }
                     null -> Unit
                 }
             }
@@ -224,6 +228,17 @@ class AgentConnection(
                 try { socket?.close(1000, "reconnect") } catch (_: Exception) { }
                 socket = null
             }
+        }
+    }
+
+    /** The server owns the headset's name: keep it for the next hello, the screen and the next launch. */
+    private suspend fun adoptServerName(name: String) {
+        current = current.withServerName(name)
+        diagnostics.setDeviceName(current.deviceName)
+        try {
+            IdentityStore(context).saveServerName(name)
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "saving the server's device name failed: ${error.message}")
         }
     }
 

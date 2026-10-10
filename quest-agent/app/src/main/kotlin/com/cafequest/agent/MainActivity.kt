@@ -181,6 +181,8 @@ fun Screens(
             } else {
                 SetupScreen(
                     identity = identity,
+                    // The server's latest name, so an untouched Save never sends a stale one back.
+                    currentName = diagnostics.deviceName ?: identity?.deviceName ?: "",
                     store = store,
                     onSaved = {
                         scope.launch {
@@ -222,7 +224,7 @@ fun DiagnosticsScreen(
 
     val status: @Composable () -> Unit = {
         Panel(rail = link.tone.color()) {
-            Text(identity?.deviceName ?: "…", style = MaterialTheme.typography.headlineSmall)
+            Text(diagnostics.deviceName ?: identity?.deviceName ?: "…", style = MaterialTheme.typography.headlineSmall)
             Text(link.word, style = MaterialTheme.typography.displaySmall, color = link.tone.color())
             Text(link.caption, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
         }
@@ -262,7 +264,7 @@ fun DiagnosticsScreen(
                         Text(s.castRequestPending, style = MaterialTheme.typography.bodyMedium, color = CqColors.ChalkDim)
                         PrimaryAction(
                             label = s.castShare,
-                            description = s.castShareLabel(identity?.deviceName ?: "CafeQuest"),
+                            description = s.castShareLabel(diagnostics.deviceName ?: identity?.deviceName ?: "CafeQuest"),
                         ) { casting.sessionId?.let(onShareScreen) }
                     }
                     CastingPhase.NEGOTIATING -> {
@@ -325,11 +327,11 @@ private fun castRail(phase: CastingPhase): Color = when (phase) {
 }
 
 @Composable
-fun SetupScreen(identity: AgentIdentity?, store: IdentityStore, onSaved: () -> Unit, onCancel: () -> Unit) {
+fun SetupScreen(identity: AgentIdentity?, currentName: String, store: IdentityStore, onSaved: () -> Unit, onCancel: () -> Unit) {
     val s = LocalStrings.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var name by remember(identity) { mutableStateOf(identity?.deviceName ?: "") }
+    var name by remember(identity, currentName) { mutableStateOf(currentName) }
     var mode by remember(identity) { mutableStateOf(identity?.serverMode ?: ServerMode.AUTO) }
     var host by remember(identity) { mutableStateOf(identity?.serverHost ?: "") }
     var port by remember(identity) { mutableStateOf((identity?.serverPort ?: DEFAULT_SERVER_PORT).toString()) }

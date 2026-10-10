@@ -38,6 +38,8 @@ data class StoredSetup(
     val serverMode: String? = null,
     val serverName: String? = null,
     val metaAppId: String? = null,
+    /** "true" while a typed name awaits the server's confirmation. */
+    val nameSetByStaff: String? = null,
 )
 
 /** Raw setup-screen fields, before trimming or validation. */
@@ -62,9 +64,11 @@ fun resolveIdentity(
     deviceId: String,
     stored: StoredSetup,
     defaults: AgentSetupDefaults,
+    previousDeviceId: String? = null,
 ): AgentIdentity = AgentIdentity(
     deviceId = deviceId,
     deviceName = stored.deviceName.orNullIfBlank() ?: "Quest ${deviceId.take(4).uppercase()}",
+    nameSetByStaff = stored.nameSetByStaff == "true" && stored.deviceName.orNullIfBlank() != null,
     serverHost = stored.serverHost.orNullIfBlank() ?: "",
     serverPort = stored.serverPort.orNullIfBlank()?.toIntOrNull()?.let(::clampPort) ?: DEFAULT_SERVER_PORT,
     serverMode = ServerMode.fromStored(stored.serverMode),
@@ -72,6 +76,7 @@ fun resolveIdentity(
     metaAppId = stored.metaAppId.orNullIfBlank()?.takeUnless { it == UNCONFIGURED_APP_ID }
         ?: defaults.metaAppId.orNullIfBlank()
         ?: UNCONFIGURED_APP_ID,
+    previousDeviceId = previousDeviceId,
 )
 
 /**
@@ -92,8 +97,11 @@ fun mergeSetup(current: AgentIdentity, input: AgentSetupInput): AgentIdentity {
         current.serverMode == ServerMode.MANUAL -> current.copy(serverHost = "")
         else -> current
     }
+    val deviceName = input.deviceName.orNullIfBlank() ?: current.deviceName
     return server.copy(
-        deviceName = input.deviceName.orNullIfBlank() ?: current.deviceName,
+        deviceName = deviceName,
+        // A typed name differing from what the server last confirmed is an edit to send once.
+        nameSetByStaff = current.nameSetByStaff || deviceName != current.deviceName,
         serverMode = input.serverMode,
         metaAppId = input.metaAppId.orNullIfBlank() ?: current.metaAppId,
     )
@@ -103,3 +111,14 @@ fun mergeSetup(current: AgentIdentity, input: AgentSetupInput): AgentIdentity {
 fun withDiscovered(current: AgentIdentity, found: FoundServer): AgentIdentity? =
     if (current.serverMode == ServerMode.MANUAL) null
     else current.copy(serverHost = found.host, serverPort = found.port, serverName = found.name)
+
+/**
+ * The name the server confirmed or assigned. It replaces the local one and
+ * settles any pending edit, except that a name typed since the last hello is
+ * kept: it has not reached the server yet and must not be overwritten here.
+ */
+fun AgentIdentity.withServerName(name: String): AgentIdentity {
+    val trimmed = name.orNullIfBlank() ?: return this
+    if (nameSetByStaff && trimmed != deviceName) return this
+    return copy(deviceName = trimmed, nameSetByStaff = false)
+}

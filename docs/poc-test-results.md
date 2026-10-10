@@ -209,6 +209,10 @@ Date: 2026-10-08
 | Find server button | NOT TESTED | Morning-test row 17. |
 | PC IP change healing | NOT TESTED | Agent searches before every retry after 3 failed connects; morning-test row 18. |
 | Manual IP stays pinned | NOT TESTED | Unit-tested rule (Manual never searches); morning-test row 19. |
+| Uninstall/reinstall keeps one headset card and name | PASS (2026-10-10, Quest 3) | `adb install -r` of 0.6.0 over 0.5.0 migrated the old random-UUID row (`efbf…`) to the stable ID (`06ad…`) with name and history kept. A full uninstall + reinstall (same debug key; `firstInstallTime` reset) then reconnected as the same `06ad…` ID and the same "Quest 01" card, with no new row. Not tested on hardware: `pm clear` (morning-test row 16) and the headset-side Auto-discovery text. |
+| App-data clear (`pm clear`) keeps one headset card and name | PASS (2026-10-10, Quest 3, agent 0.7.0) | After `pm clear` the local name was gone; on reopen the headset reconnected as the same `06ad…` ID, the server sent `device_name` and the headset stored the server's name (then "Quest 01 sync-test"). One card, usage access and `WRITE_SECURE_SETTINGS` still granted. Headset-side Auto-discovery text not inspected. |
+| Dashboard rename reaches the headset | PASS (2026-10-10, Quest 3) | `POST /api/devices/:id/rename` changed the headset's stored name within 3 s, both ways (to "Quest 01 sync-test" and back to "Quest 01"). The dashboard's Rename button itself and the headset's on-screen text were not clicked or inspected (jsdom/unit tested only). |
+| Name typed on the headset renames the dashboard card | NOT TESTED | Server hello handling, flag rules and agent merge rules are automated; typing in the headset's setup screen has not been done (morning-test row 48). |
 
 ## Bugs found during this hardware run
 

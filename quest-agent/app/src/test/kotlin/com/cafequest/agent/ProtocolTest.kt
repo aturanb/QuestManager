@@ -15,15 +15,43 @@ class ProtocolTest {
         assertFalse(json.contains("enrollmentKey"))
     }
 
-    @Test fun `the default hello advertises package launch, screen cast and controller monitoring exactly once`() {
+    @Test fun `hello includes the previous install id when an upgraded headset migrates`() {
         val json = protocolJson.encodeToString(
-            Hello(deviceId = "d", deviceName = "Quest 01", deviceModel = "Quest 3", agentVersion = "0.5.0")
+            Hello(
+                deviceId = "new-id",
+                deviceName = "Headset 01",
+                deviceModel = "Quest 3",
+                agentVersion = "0.6.0",
+                previousDeviceId = "old-id",
+            )
+        )
+
+        assertTrue(json.contains("\"previousDeviceId\":\"old-id\""))
+    }
+
+    @Test fun `the default hello advertises package launch, screen cast, controller monitoring and device name exactly once`() {
+        val json = protocolJson.encodeToString(
+            Hello(deviceId = "d", deviceName = "Quest 01", deviceModel = "Quest 3", agentVersion = "0.7.0")
         )
         assertTrue(
-            json.contains("\"capabilities\":[\"launch_android_package\",\"screen_cast_v1\",\"controller_monitoring_v1\"]")
+            json.contains(
+                "\"capabilities\":[\"launch_android_package\",\"screen_cast_v1\",\"controller_monitoring_v1\",\"device_name_v1\"]"
+            )
         )
         assertEquals(1, Regex(Regex.escape(CAPABILITY_SCREEN_CAST)).findAll(json).count())
         assertEquals(1, Regex(Regex.escape(CAPABILITY_CONTROLLER_MONITORING)).findAll(json).count())
+        assertEquals(1, Regex(Regex.escape(CAPABILITY_DEVICE_NAME)).findAll(json).count())
+    }
+
+    @Test fun `hello carries deviceNameSetByStaff only while a typed name is pending`() {
+        val pending = protocolJson.encodeToString(
+            Hello(deviceId = "d", deviceName = "Quest 07", deviceModel = "Quest 3", agentVersion = "0.7.0", deviceNameSetByStaff = true)
+        )
+        assertTrue(pending.contains("\"deviceNameSetByStaff\":true"))
+        val settled = protocolJson.encodeToString(
+            Hello(deviceId = "d", deviceName = "Quest 07", deviceModel = "Quest 3", agentVersion = "0.7.0")
+        )
+        assertFalse(settled.contains("deviceNameSetByStaff"))
     }
 
     @Test fun `explicit screen cast capability serializes beside package launch`() {
@@ -195,6 +223,30 @@ class ProtocolTest {
             """{"type":"controller_monitoring","protocolVersion":1,"enabled":null}""",
             """{"type":"controller_monitoring","protocolVersion":2,"enabled":true}""",
             """{"type":"controller_monitoring","enabled":true}""",
+        )) {
+            assertNull(raw, parseServerMessage(raw))
+        }
+    }
+
+    @Test fun `parseServerMessage reads a device name frame`() {
+        val parsed = parseServerMessage("""{"type":"device_name","protocolVersion":1,"name":"Quest 01"}""")
+        assertTrue(parsed is ParsedServerMessage.DeviceName)
+        assertEquals("Quest 01", (parsed as ParsedServerMessage.DeviceName).message.name)
+        val longest = "x".repeat(64)
+        val atLimit = parseServerMessage("""{"type":"device_name","protocolVersion":1,"name":"$longest"}""")
+        assertEquals(longest, (atLimit as ParsedServerMessage.DeviceName).message.name)
+    }
+
+    @Test fun `parseServerMessage rejects malformed device name frames`() {
+        for (raw in listOf(
+            """{"type":"device_name","protocolVersion":1}""",
+            """{"type":"device_name","protocolVersion":1,"name":""}""",
+            """{"type":"device_name","protocolVersion":1,"name":"   "}""",
+            """{"type":"device_name","protocolVersion":1,"name":7}""",
+            """{"type":"device_name","protocolVersion":1,"name":null}""",
+            """{"type":"device_name","protocolVersion":1,"name":"${"x".repeat(65)}"}""",
+            """{"type":"device_name","protocolVersion":2,"name":"Quest 01"}""",
+            """{"type":"device_name","name":"Quest 01"}""",
         )) {
             assertNull(raw, parseServerMessage(raw))
         }

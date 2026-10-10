@@ -145,6 +145,64 @@ class SetupValuesTest {
         assertEquals(UNCONFIGURED_APP_ID, resolveIdentity(deviceId, StoredSetup(), AgentSetupDefaults(metaAppId = "")).metaAppId)
     }
 
+    // --- device name: the server owns it; only a typed, unconfirmed name is sent as an edit ---
+
+    @Test fun `typing a different name marks it as pending for the server`() {
+        val merged = mergeSetup(auto, input(deviceName = " Quest 07 "))
+        assertEquals("Quest 07", merged.deviceName)
+        assertTrue(merged.nameSetByStaff)
+    }
+
+    @Test fun `saving the unchanged name does not mark it pending`() {
+        assertFalse(mergeSetup(auto, input(deviceName = "Quest 01")).nameSetByStaff)
+        assertFalse(mergeSetup(auto, input(deviceName = "  ")).nameSetByStaff)
+    }
+
+    @Test fun `saving again without touching the name keeps a pending name pending`() {
+        val pending = mergeSetup(auto, input(deviceName = "Quest 07"))
+        val resaved = mergeSetup(pending, input(deviceName = "Quest 07"))
+        assertTrue(resaved.nameSetByStaff)
+        assertTrue(mergeSetup(pending, input(deviceName = "")).nameSetByStaff)
+    }
+
+    @Test fun `the pending flag is read back only beside a stored name`() {
+        val pending = resolveIdentity(deviceId, StoredSetup(deviceName = "Quest 07", nameSetByStaff = "true"), baked)
+        assertTrue(pending.nameSetByStaff)
+        assertFalse(resolveIdentity(deviceId, StoredSetup(deviceName = "Quest 07"), baked).nameSetByStaff)
+        assertFalse(resolveIdentity(deviceId, StoredSetup(nameSetByStaff = "true"), baked).nameSetByStaff)
+        assertFalse(resolveIdentity(deviceId, StoredSetup(deviceName = "Quest 07", nameSetByStaff = "yes"), baked).nameSetByStaff)
+    }
+
+    @Test fun `the server's name replaces the local one and clears the pending flag`() {
+        val adopted = auto.copy(deviceName = "Quest EFGH").withServerName(" Quest 01 ")
+        assertEquals("Quest 01", adopted.deviceName)
+        assertFalse(adopted.nameSetByStaff)
+    }
+
+    @Test fun `the server confirming the typed name clears the pending flag`() {
+        val confirmed = mergeSetup(auto, input(deviceName = "Quest 07")).withServerName("Quest 07")
+        assertEquals("Quest 07", confirmed.deviceName)
+        assertFalse(confirmed.nameSetByStaff)
+    }
+
+    @Test fun `a name typed since the last hello is not clobbered by a different server name`() {
+        val typed = mergeSetup(auto, input(deviceName = "Quest 07"))
+        assertEquals(typed, typed.withServerName("Quest 01"))
+    }
+
+    @Test fun `a blank server name is ignored`() {
+        assertEquals(auto, auto.withServerName("   "))
+    }
+
+    @Test fun `the hello sends the typed name flag only while it is pending`() {
+        val pending = mergeSetup(auto, input(deviceName = "Quest 07")).toHello("Quest 3", "0.7.0")
+        assertEquals("Quest 07", pending.deviceName)
+        assertEquals(true, pending.deviceNameSetByStaff)
+        val settled = auto.toHello("Quest 3", "0.7.0")
+        assertEquals("Quest 01", settled.deviceName)
+        assertNull(settled.deviceNameSetByStaff)
+    }
+
     private fun input(
         deviceName: String = "Quest 01",
         serverMode: ServerMode = ServerMode.AUTO,

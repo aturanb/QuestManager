@@ -28,7 +28,44 @@ export type DeviceCardProps = {
   onExtend: (sessionId: string, minutes: number) => void;
   onStop: (sessionId: string) => void;
   onRemove: (deviceId: string) => void;
+  /** Staff rename; the server keeps the name and tells the headset. */
+  onRename: (deviceId: string, name: string) => void;
 };
+
+function RenameForm(props: { name: string; onSave: (name: string) => void; onCancel: () => void }) {
+  const { t } = useI18n();
+  const c = t.card;
+  const [draft, setDraft] = useState(props.name);
+  const trimmed = draft.trim();
+  const canSave = trimmed !== "" && trimmed !== props.name;
+  return (
+    <form
+      className="rename-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (canSave) props.onSave(trimmed);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") props.onCancel();
+      }}
+    >
+      <input
+        type="text"
+        aria-label={c.renameField(props.name)}
+        value={draft}
+        maxLength={64}
+        autoFocus
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <button type="submit" className="btn" aria-label={c.renameSaveLabel(props.name)} disabled={!canSave}>
+        {c.renameSave}
+      </button>
+      <button type="button" className="btn" aria-label={c.renameCancelLabel(props.name)} onClick={props.onCancel}>
+        {c.renameCancel}
+      </button>
+    </form>
+  );
+}
 
 function InstalledAppDetails(props: {
   app: InstalledApp;
@@ -255,6 +292,7 @@ export function DeviceCard(props: DeviceCardProps) {
     state.kind === "playing" || state.kind === "ending" || state.kind === "unlimited" ? device.session : null;
   const [customMin, setCustomMin] = useState("45");
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const status = launchStatus(props.pendingCommandId, device);
 
   const picker = useLaunchPicker(device, games);
@@ -304,7 +342,23 @@ export function DeviceCard(props: DeviceCardProps) {
               />
             </label>
           )}
-          <h2>{device.name}</h2>
+          {renaming ? (
+            <RenameForm
+              name={device.name}
+              onSave={(name) => {
+                setRenaming(false);
+                props.onRename(device.id, name);
+              }}
+              onCancel={() => setRenaming(false)}
+            />
+          ) : (
+            <>
+              <h2>{device.name}</h2>
+              <button className="btn-text rename-btn" aria-label={c.renameLabel(device.name)} onClick={() => setRenaming(true)}>
+                {c.rename}
+              </button>
+            </>
+          )}
         </div>
         <p className="link-state">{connection}</p>
       </header>

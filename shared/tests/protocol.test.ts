@@ -21,6 +21,8 @@ import {
   SCREEN_CAST_CAPABILITY,
   ControllerMonitoringSchema,
   CONTROLLER_MONITORING_CAPABILITY,
+  DeviceNameSchema,
+  DEVICE_NAME_CAPABILITY,
 } from "../src/protocol.js";
 import { parseAgentMessage } from "../src/parse.js";
 
@@ -51,6 +53,16 @@ const telemetry = {
 
 test("hello schema accepts a valid hello", () => {
   assert.equal(HelloSchema.safeParse(hello).success, true);
+});
+
+test("hello preserves a previous install id for one-time device migration", () => {
+  const previousDeviceId = "7a6c1c78-30cc-4ba8-8e72-cfcf3a729c18";
+  const parsed = HelloSchema.safeParse({ ...hello, previousDeviceId });
+
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal((parsed.data as Record<string, unknown>).previousDeviceId, previousDeviceId);
+  }
 });
 
 test("hello advertises package-launch support without breaking older agents", () => {
@@ -449,4 +461,41 @@ test("telemetry carries wirelessDebugging, and an unknown value never rejects th
     assert.equal(parsed.ok, true, JSON.stringify(future));
     if (parsed.ok && parsed.value.type === "telemetry") assert.equal(parsed.value.wirelessDebugging, undefined);
   }
+});
+
+test("hello carries an optional deviceNameSetByStaff flag that must be a boolean", () => {
+  assert.equal(HelloSchema.safeParse({ ...hello, deviceNameSetByStaff: true }).success, true);
+  assert.equal(HelloSchema.safeParse({ ...hello, deviceNameSetByStaff: false }).success, true);
+  // Absent stays absent: agents older than 0.7.0 never send it.
+  const absent = HelloSchema.safeParse(hello);
+  assert.equal(absent.success, true);
+  if (absent.success) assert.equal(absent.data.deviceNameSetByStaff, undefined);
+  for (const bad of ["true", 1, null]) {
+    assert.equal(HelloSchema.safeParse({ ...hello, deviceNameSetByStaff: bad }).success, false, JSON.stringify(bad));
+  }
+});
+
+test("device_name is a bounded server-to-agent frame in the v1 envelope", () => {
+  assert.equal(DEVICE_NAME_CAPABILITY, "device_name_v1");
+  const frame = { type: "device_name", protocolVersion: 1, name: "Quest 01" };
+  assert.equal(DeviceNameSchema.safeParse(frame).success, true);
+  assert.equal(DeviceNameSchema.safeParse({ ...frame, name: "x".repeat(64) }).success, true);
+  for (const bad of [
+    { ...frame, name: "" },
+    { ...frame, name: "x".repeat(65) },
+    { ...frame, name: 7 },
+    { type: frame.type, protocolVersion: 1 },
+    { ...frame, protocolVersion: 2 },
+    { ...frame, type: "device_rename" },
+  ]) {
+    assert.equal(DeviceNameSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("hello accepts device_name_v1 beside the other capabilities", () => {
+  const parsed = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package", "screen_cast_v1", "controller_monitoring_v1", DEVICE_NAME_CAPABILITY],
+  });
+  assert.equal(parsed.success, true);
 });

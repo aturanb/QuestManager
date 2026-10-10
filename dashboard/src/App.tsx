@@ -5,6 +5,7 @@ import {
   castSocketUrl,
   connectStateSocket,
   deleteDevice,
+  renameDevice,
   extendSession,
   getCatalogStatus,
   getGames,
@@ -534,6 +535,7 @@ export function App({ castFactory }: AppProps = {}) {
             onExtend={(sessionId, minutes) => runCardAction(d.id, () => extendSession(key, sessionId, minutes))}
             onStop={(sessionId) => runCardAction(d.id, () => stopSession(key, sessionId))}
             onRemove={removeDevice}
+            onRename={(deviceId, name) => runCardAction(deviceId, () => renameDevice(key, deviceId, name))}
             castBusy={liveView !== null}
             onRequestCast={(deviceId) => {
               const target = devices.find((device) => device.id === deviceId);

@@ -22,6 +22,15 @@ class DiagnosticsTest {
         assertFalse(state.battery?.charging ?: true)
     }
 
+    @Test fun `diagnostics carries the name the server assigned so the screen can follow a dashboard rename`() {
+        val diagnostics = AgentDiagnostics { "2026-01-02T03:04:05Z" }
+        assertNull(diagnostics.state.value.deviceName)
+
+        diagnostics.setDeviceName("Quest 01")
+
+        assertEquals("Quest 01", diagnostics.state.value.deviceName)
+    }
+
     @Test fun `test launch without a previous game reports a useful failure`() = runTest {
         val diagnostics = AgentDiagnostics { "2026-01-02T03:04:05Z" }
         val launcher = FakeAppLauncher()

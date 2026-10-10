@@ -20,6 +20,8 @@ data class AgentDiagnosticsState(
     val lastResult: String = "—",
     /** Published by the connection; Auto discovery may move it. Null until the service starts. */
     val server: ServerTarget? = null,
+    /** The name the server last assigned; null until a frame arrives, then it overrides the saved one on screen. */
+    val deviceName: String? = null,
 )
 
 /** Process-local state shared by the foreground service and diagnostics UI. */
@@ -35,6 +37,7 @@ class AgentDiagnostics(
     fun setBattery(battery: Battery) = _state.update { it.copy(battery = battery) }
     fun setServiceRunning(running: Boolean) = _state.update { it.copy(serviceRunning = running) }
     fun setServer(server: ServerTarget) = _state.update { it.copy(server = server) }
+    fun setDeviceName(name: String) = _state.update { it.copy(deviceName = name) }
 
     suspend fun launch(
         payload: LaunchPayload,

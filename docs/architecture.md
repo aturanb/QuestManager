@@ -32,6 +32,23 @@ and then send video directly over the café LAN.
   Any agent message refreshes `lastSeenAt`, and so does the pong to the hub's 5s
   WebSocket ping: a headset that stops sending telemetry stays online while its
   socket still answers.
+- **Headset identity survives reinstall**: the Android agent converts
+  `Settings.Secure.ANDROID_ID` into a namespaced protocol UUID. Android scopes
+  that source value to the device user and APK signing key, so clearing app
+  data or reinstalling the same signed APK reconnects to the same server row.
+  On the first upgraded connection, optional `hello.previousDeviceId` moves the
+  old random-UUID row and its sessions, commands and app inventory to the stable
+  ID. The server keeps the row's staff-assigned name instead of replacing it
+  with the fresh install's default name.
+- **The server owns the headset's name**: it sends `device_name {name}`
+  (capability `device_name_v1`) to a capable agent right after every accepted
+  hello and whenever the dashboard renames it, so a reinstalled headset adopts
+  "Quest 01" at once and its screen follows a dashboard rename. A name typed on
+  the headset's setup screen goes up as `hello.deviceNameSetByStaff: true` and
+  is the only agent name that may rename an existing row; the agent clears the
+  flag when the server echoes the name back. A fresh install's default name is
+  never flagged, so it cannot overwrite a staff name. Renaming on the
+  dashboard is `POST /api/devices/:id/rename`.
 - **expectedCurrentGame** = the last game CafeQuest successfully asked to launch (§18).
   We never claim to know the true foreground app.
 - **Command lifecycle**: `sent → received → success|failed`, else `timeout` after 10s (§21).

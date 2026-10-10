@@ -6,6 +6,8 @@ export const LAUNCH_ANDROID_PACKAGE_CAPABILITY = "launch_android_package" as con
 export const SCREEN_CAST_CAPABILITY = "screen_cast_v1" as const;
 /** Capability that gates the server → agent monitoring frame; older agents omit it. */
 export const CONTROLLER_MONITORING_CAPABILITY = "controller_monitoring_v1" as const;
+/** Capability that gates the server → agent name frame; older agents omit it. */
+export const DEVICE_NAME_CAPABILITY = "device_name_v1" as const;
 /** Signaling bounds keep every relayed frame small; SDP is the largest payload. */
 export const MAX_CAST_SDP_CHARS = 65_536;
 export const MAX_CAST_ICE_CANDIDATE_CHARS = 4_096;
@@ -24,7 +26,14 @@ export const HelloSchema = z.object({
   type: z.literal("hello"),
   protocolVersion: z.literal(PROTOCOL_VERSION),
   deviceId: z.string().uuid(),
+  // An upgraded agent sends its old DataStore UUID so the server can move the
+  // existing row to the Android-scoped stable id before a future reinstall.
+  previousDeviceId: z.string().uuid().optional(),
   deviceName: z.string().min(1).max(64),
+  // True only while the name was typed on the headset and the server has not yet
+  // confirmed it. Without it the server keeps its own name, so a reinstalled
+  // headset's default name never overwrites a staff-assigned one.
+  deviceNameSetByStaff: z.boolean().optional(),
   deviceModel: z.string().min(1).max(64),
   agentVersion: z.string().min(1).max(32),
   // Optional keeps protocol v1 hellos from older agents valid. The server must
@@ -232,6 +241,13 @@ export const ControllerMonitoringSchema = z.object({
   enabled: z.boolean(),
 });
 
+/** Server → agent: the headset's authoritative name, sent after hello and on every rename. */
+export const DeviceNameSchema = z.object({
+  type: z.literal("device_name"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  name: z.string().min(1).max(64),
+});
+
 /** Browser viewer → server: answers and ICE only; the viewer never offers. */
 export const ViewerCastSignalSchema = z.object({
   type: z.literal("cast_signal"),
@@ -316,6 +332,7 @@ export type AgentCapability = z.infer<typeof AgentCapabilitySchema>;
 export type Telemetry = z.infer<typeof TelemetrySchema>;
 export type WirelessDebuggingState = z.infer<typeof WirelessDebuggingSchema>;
 export type ControllerMonitoring = z.infer<typeof ControllerMonitoringSchema>;
+export type DeviceName = z.infer<typeof DeviceNameSchema>;
 export type InstalledApp = z.infer<typeof InstalledAppSchema>;
 export type InstalledApps = z.infer<typeof InstalledAppsSchema>;
 export type CommandAck = z.infer<typeof CommandAckSchema>;

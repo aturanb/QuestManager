@@ -5,6 +5,7 @@ import type { Db } from "./db.js";
 import { nowIso, openDb, seedGames } from "./db.js";
 import {
   upsertDevice,
+  rekeyDevice,
   touchDevice,
   getDevice,
   renameDevice,
@@ -157,12 +158,24 @@ export async function buildApp(cfg: AppConfig) {
           return;
         }
         deviceId = hello.data.deviceId;
-        const device = upsertDevice(db, {
+        if (hello.data.previousDeviceId && rekeyDevice(db, hello.data.previousDeviceId, deviceId)) {
+          app.log.info(
+            { previousId: hello.data.previousDeviceId, device: deviceId },
+            "device record moved to stable identity"
+          );
+        }
+        let device = upsertDevice(db, {
           id: hello.data.deviceId,
           name: hello.data.deviceName,
           model: hello.data.deviceModel,
           agentVersion: hello.data.agentVersion,
         });
+        // Only a name typed on the headset renames an existing record; the
+        // agent's default name after a reinstall must never beat the server's.
+        const typedName = hello.data.deviceNameSetByStaff ? hello.data.deviceName.trim() : "";
+        if (typedName && typedName !== device.name) {
+          device = renameDevice(db, device.id, typedName) ?? device;
+        }
         app.log.info({ device: device.name, id: device.id }, "device connected");
         // A fresh hello proves liveness now: without this, a reconnecting
         // device keeps its old last_seen_at and the offline sweep drops the
@@ -288,10 +301,12 @@ export async function buildApp(cfg: AppConfig) {
 
   app.post("/api/devices/:deviceId/rename", async (req, reply) => {
     const { deviceId } = req.params as { deviceId: string };
-    const body = z.object({ name: z.string().min(1).max(64) }).safeParse(req.body);
+    const body = z.object({ name: z.string().trim().min(1).max(64) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "invalid name" });
     const updated = renameDevice(db, deviceId, body.data.name);
     if (!updated) return reply.code(404).send({ error: "device not found" });
+    hub.announceDeviceName(deviceId, updated.name);
+    hub.pushDashboardState();
     return { device: updated };
   });
 

@@ -244,3 +244,35 @@ control room; a single in-memory session cannot leak into SQLite, queues or
 stale state, and a bounded video profile keeps the cost predictable on a share
 of the café's Wi-Fi and the headset's battery. "Busy" is a clearer answer for
 staff than a queue whose owner may already be gone.
+
+## Headset identity survives app-data loss and reinstall
+
+Decision: the agent derives its protocol UUID from Android's app-signing-key,
+user and device-scoped `ANDROID_ID`, namespaced before it leaves the headset.
+An upgraded install also sends its former DataStore UUID as optional
+`hello.previousDeviceId`; the server transactionally moves or merges that row,
+including sessions, commands and app inventory, while preserving its assigned
+name. Older agents remain valid because the hello field is additive.
+
+Reason: a random UUID stored only in DataStore disappears on clear-data or
+uninstall, which produced a new card and left the old card stale. Android's
+scoped value survives reinstall without exposing a raw device identifier. A
+factory reset, another device user or another signing key intentionally creates
+a new identity.
+
+## The server owns the headset name, and both sides can rename
+
+Decision: a headset's name lives on the server. After every accepted hello and
+every dashboard rename the server sends `device_name {name}` to agents that
+advertise `device_name_v1`; the agent stores it and shows it. A name typed on
+the headset is sent as `hello.deviceNameSetByStaff: true` until the server
+echoes it back, and only then may it rename an existing row. A pending typed
+name is never overwritten by a different server name, and the setup field starts
+from the server's latest name so an untouched Save never pushes a stale one.
+The dashboard card has a Rename control.
+
+Reason: the name previously flowed one way only (headset to server, first
+sight), so a rename typed on the headset was silently ignored and the dashboard
+had no rename at all. Flagging typed names, rather than always trusting the
+agent's, keeps a reinstall's default "Quest XXXX" from clobbering "Quest 01".
+Last write wins when both sides rename while disconnected.

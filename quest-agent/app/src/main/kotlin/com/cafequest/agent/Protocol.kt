@@ -17,6 +17,10 @@ const val LOG_TAG = "CafeQuest"
 const val CAPABILITY_LAUNCH_ANDROID_PACKAGE = "launch_android_package"
 const val CAPABILITY_SCREEN_CAST = "screen_cast_v1"
 const val CAPABILITY_CONTROLLER_MONITORING = "controller_monitoring_v1"
+const val CAPABILITY_DEVICE_NAME = "device_name_v1"
+
+/** Mirrors the Zod bound on a device name. */
+const val MAX_DEVICE_NAME_CHARS = 64
 
 /** Mirrors shared MAX_CAST_SDP_CHARS / MAX_CAST_ICE_CANDIDATE_CHARS. */
 const val MAX_CAST_SDP_CHARS = 65_536
@@ -41,7 +45,11 @@ data class Hello(
         CAPABILITY_LAUNCH_ANDROID_PACKAGE,
         CAPABILITY_SCREEN_CAST,
         CAPABILITY_CONTROLLER_MONITORING,
+        CAPABILITY_DEVICE_NAME,
     ),
+    val previousDeviceId: String? = null,
+    /** True only while a name typed on the headset awaits the server's confirmation; null is omitted. */
+    val deviceNameSetByStaff: Boolean? = null,
 )
 
 @Serializable
@@ -262,6 +270,13 @@ data class ControllerMonitoringMessage(
     val enabled: Boolean,
 )
 
+@Serializable
+data class DeviceNameMessage(
+    val type: String = "device_name",
+    val protocolVersion: Int = PROTOCOL_VERSION,
+    val name: String,
+)
+
 /** One parsed inbound server frame; distinct variants keep directions explicit. */
 sealed interface ParsedServerMessage {
     data class Launch(val command: ServerCommand) : ParsedServerMessage
@@ -269,6 +284,7 @@ sealed interface ParsedServerMessage {
     data class CastSignal(val message: ServerCastSignalMessage) : ParsedServerMessage
     data class CastStop(val message: CastStopMessage) : ParsedServerMessage
     data class ControllerMonitoring(val message: ControllerMonitoringMessage) : ParsedServerMessage
+    data class DeviceName(val message: DeviceNameMessage) : ParsedServerMessage
 }
 
 private val CAST_UUID_RE =
@@ -312,6 +328,11 @@ fun parseServerMessage(raw: String): ParsedServerMessage? {
             if (enabled == null || enabled.isString) return null
             val value = enabled.booleanOrNull ?: return null
             ParsedServerMessage.ControllerMonitoring(ControllerMonitoringMessage(enabled = value))
+        }
+        "device_name" -> {
+            val message = runCatching { protocolJson.decodeFromString<DeviceNameMessage>(raw) }.getOrNull() ?: return null
+            if (message.name.isBlank() || message.name.length > MAX_DEVICE_NAME_CHARS) return null
+            ParsedServerMessage.DeviceName(message)
         }
         else -> null
     }

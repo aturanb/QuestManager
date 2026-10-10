@@ -1,6 +1,16 @@
 # Quest Setup (per headset)
 
-All values live in the agent's setup screen and persist in DataStore (§38).
+Setup values live in the agent's setup screen and persist in DataStore (§38).
+The headset identity does not depend on DataStore: it is derived from Android's
+app-signing-key/user/device-scoped ID, so clearing app data or reinstalling the
+same signed APK reconnects to the same dashboard card and keeps its server-side
+name and history.
+
+The headset's name belongs to the server. Rename a headset from the **Rename**
+link on its dashboard card; the headset's own screen follows within seconds.
+Typing a different name in **Change setup → Device name** renames it on the
+dashboard too. A fresh install's default name ("Quest A1B2") never replaces a
+name staff already set.
 
 A fresh install needs no typing: in **Auto** mode (the default) the headset finds
 the café PC on the Wi-Fi by itself and follows it when the PC's IP changes. The
@@ -48,6 +58,15 @@ adb shell appops set com.cafequest.agent GET_USAGE_STATS allow
 # while a game is open. Once per headset; it survives `adb install -r`.
 adb shell appops set com.cafequest.agent SYSTEM_ALERT_WINDOW allow
 ```
+
+Use the same APK signing key for every rebuild of this installation. A factory
+reset, a different headset user, or a different signing key creates a new
+Android-scoped identity and therefore a new dashboard card. The current
+upgrade migrates the installed agent's former random ID on its first connection.
+For this one-time upgrade, install with `adb install -r`, open CafeQuest, and
+wait for it to connect before clearing its data or uninstalling it. After that
+first connection, clears and reinstalls keep the same card. Older stale cards
+that predate the active ID still need one manual removal.
 
 Without that grant every card reads **Usage access required** instead of the
 current game. Nothing else breaks: battery, sessions, and launching still work.

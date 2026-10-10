@@ -26,7 +26,7 @@ function props(over: Partial<DeviceCardProps> = {}): DeviceCardProps {
     device: device(), games, now: NOW, serverOffsetMs: 0,
     pendingCommandId: null, busy: false, error: null,
     onLaunch: vi.fn(), onLaunchInstalled: vi.fn(), onMapInstalled: vi.fn(),
-    onStartSession: vi.fn(), onExtend: vi.fn(), onStop: vi.fn(), onRemove: vi.fn(), ...over,
+    onStartSession: vi.fn(), onExtend: vi.fn(), onStop: vi.fn(), onRemove: vi.fn(), onRename: vi.fn(), ...over,
   };
 }
 
@@ -288,6 +288,52 @@ describe("DeviceCard", () => {
     expect(view.container.querySelectorAll('.cells i[data-lit="true"]')).toHaveLength(1);
   });
 
+  it("renames a headset, online or offline, with the trimmed name", () => {
+    for (const online of [true, false]) {
+      const p = props({ device: device({ online }) });
+      const view = render(<DeviceCard {...p} />);
+      fireEvent.click(screen.getByRole("button", { name: "Rename Quest 01" }));
+      const field = screen.getByRole("textbox", { name: "New name for Quest 01" });
+      expect(field).toHaveValue("Quest 01");
+      expect(field).toHaveFocus();
+      fireEvent.change(field, { target: { value: "  Bay 3  " } });
+      fireEvent.click(screen.getByRole("button", { name: "Save the new name for Quest 01" }));
+      expect(p.onRename).toHaveBeenCalledWith("d1", "Bay 3");
+      expect(screen.queryByRole("textbox", { name: "New name for Quest 01" })).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("submits a new name with Enter and does not offer to save a blank or unchanged one", () => {
+    const p = props();
+    render(<DeviceCard {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Quest 01" }));
+    const field = screen.getByRole("textbox", { name: "New name for Quest 01" });
+    const save = screen.getByRole("button", { name: "Save the new name for Quest 01" });
+    expect(save).toBeDisabled();
+    fireEvent.change(field, { target: { value: "   " } });
+    expect(save).toBeDisabled();
+    fireEvent.change(field, { target: { value: "Bay 4" } });
+    expect(save).toBeEnabled();
+    fireEvent.submit(field);
+    expect(p.onRename).toHaveBeenCalledWith("d1", "Bay 4");
+  });
+
+  it("backs out of renaming with Cancel or Escape without changing anything", () => {
+    const p = props();
+    render(<DeviceCard {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Quest 01" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New name for Quest 01" }), { target: { value: "Bay 5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel renaming Quest 01" }));
+    expect(screen.queryByRole("textbox", { name: "New name for Quest 01" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename Quest 01" }));
+    expect(screen.getByRole("textbox", { name: "New name for Quest 01" })).toHaveValue("Quest 01");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "New name for Quest 01" }), { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "New name for Quest 01" })).not.toBeInTheDocument();
+    expect(p.onRename).not.toHaveBeenCalled();
+  });
+
   it("does not offer removal while the headset is online", () => {
     render(<DeviceCard {...props()} />);
     expect(screen.queryByRole("button", { name: /remove quest 01/i })).not.toBeInTheDocument();
@@ -449,6 +495,18 @@ describe("DeviceCard in Turkish", () => {
     const remove = screen.queryByRole("button", { name: /panodan kaldır/ });
     if (remove) fireEvent.click(remove);
     expect(englishOn(view.container)).toEqual([]);
+  });
+
+  it("renames in Turkish with Turkish labels throughout", () => {
+    const p = props();
+    const view = renderTurkish(<DeviceCard {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: "Quest 01 gözlüğünü yeniden adlandır" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Quest 01 için yeni ad" }), { target: { value: "Bay 3" } });
+    expect(screen.getByRole("button", { name: "Quest 01 için adı kaydet" })).toHaveTextContent("Kaydet");
+    expect(screen.getByRole("button", { name: "Quest 01 için yeniden adlandırmaktan vazgeç" })).toHaveTextContent("Vazgeç");
+    expect(englishOn(view.container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Quest 01 için adı kaydet" }));
+    expect(p.onRename).toHaveBeenCalledWith("d1", "Bay 3");
   });
 
   it("requests a live view from an online capable headset", () => {

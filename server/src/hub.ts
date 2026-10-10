@@ -19,10 +19,12 @@ import {
   LAUNCH_ANDROID_PACKAGE_CAPABILITY,
   SCREEN_CAST_CAPABILITY,
   CONTROLLER_MONITORING_CAPABILITY,
+  DEVICE_NAME_CAPABILITY,
   PROTOCOL_VERSION,
   parseAgentMessage,
   type AgentCapability,
   type ControllerMonitoring,
+  type DeviceName,
   type ServerCastMessage,
   type ServerCommand,
   type ServerError,
@@ -163,6 +165,9 @@ export class Hub {
     // A reconnecting agent learns the current flag at once, so a server restart
     // or a toggle made while it was offline still reaches it.
     this.sendControllerMonitoring(conn, this.controllerBattery?.monitoringState().enabled ?? false);
+    // The server's name is the authority: a reinstalled headset adopts it here.
+    const device = getDevice(this.db, deviceId);
+    if (device) this.sendDeviceName(conn, device.name);
     this.onDeviceChanged();
     this.pushDashboardState();
   }
@@ -203,6 +208,24 @@ export class Hub {
   /** Tell every connected capable agent the monitoring flag (called when the switch flips). */
   broadcastControllerMonitoring(enabled: boolean): void {
     for (const conn of this.devices.values()) this.sendControllerMonitoring(conn, enabled);
+  }
+
+  /** One name frame to one agent that advertised the capability; false if not sent. */
+  private sendDeviceName(conn: DeviceConn, name: string): boolean {
+    if (!conn.capabilities.has(DEVICE_NAME_CAPABILITY)) return false;
+    const frame: DeviceName = { type: "device_name", protocolVersion: PROTOCOL_VERSION, name };
+    try {
+      conn.socket.send(JSON.stringify(frame));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Tell a connected headset its new name (a dashboard rename); false if offline or too old. */
+  announceDeviceName(deviceId: string, name: string): boolean {
+    const conn = this.devices.get(deviceId);
+    return conn ? this.sendDeviceName(conn, name) : false;
   }
 
   removeAgentSocket(deviceId: string, socket: WebSocket): void {

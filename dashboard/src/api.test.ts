@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ApiError, castSocketUrl, deleteDevice, getCatalogStatus, getSnapshot, launchGame, launchInstalledApp, mapInstalledApp, refreshCatalog, requestCast, setControllerBatteryMonitoring, stopCast, stopSession } from "./api";
+import { ApiError, castSocketUrl, deleteDevice, getCatalogStatus, getSnapshot, launchGame, launchInstalledApp, mapInstalledApp, refreshCatalog, renameDevice, requestCast, setControllerBatteryMonitoring, stopCast, stopSession } from "./api";
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = vi.fn().mockResolvedValue({ ok: status < 300, status, json: () => Promise.resolve(body) }) as any;
@@ -100,6 +100,16 @@ describe("api client", () => {
     expect(init.method).toBe("DELETE");
     expect(init.body).toBeUndefined();
     expect(result.deleted).toBe("dev-1");
+  });
+
+  it("renames a headset by id with the new name as JSON", async () => {
+    mockFetch(200, { device: { id: "dev-1", name: "Bay 3" } });
+    await renameDevice("k", "dev-1", "Bay 3");
+    const [url, init] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe("/api/devices/dev-1/rename");
+    expect(init.method).toBe("POST");
+    expect(init.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ name: "Bay 3" });
   });
 
   it("surfaces a refused delete of a connected headset", async () => {

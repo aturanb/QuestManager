@@ -92,6 +92,14 @@ export function deleteDevice(key: string, deviceId: string): Promise<{ deleted: 
   return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}`, key, { method: "DELETE" });
 }
 
+/** Renames a headset; the server also pushes the name to the headset itself when it is connected. */
+export function renameDevice(key: string, deviceId: string, name: string): Promise<{ device: unknown }> {
+  return apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/rename`, key, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 /** Reserves the single global live-view slot for one headset. */
 export function requestCast(key: string, deviceId: string): Promise<{ sessionId: string; status: string }> {
   return apiFetch("/api/casts", key, { method: "POST", body: JSON.stringify({ deviceId }) });
