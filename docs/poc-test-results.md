@@ -20,18 +20,34 @@ Quest model: Quest 3 (adb serial `2G0YC5ZG8106W2`), Horizon OS on Android 14.
 
 ### Physical check of the implemented feature
 
-Run after Tasks 1-7 are built and the APK is installed
+Run on the Quest 3 above (uptime 12 h, network already trusted this boot) with
+the server built from the feature branch and the APK installed
 (`adb install -r quest-agent/app/build/outputs/apk/debug/app-debug.apk`).
+Legacy TCP ADB was switched off first (`adb usb`, port 5555 refused), so only
+the new path could be responsible for any reading.
 
 | Check | Result | Notes |
 |---|---|---|
-| Grant `WRITE_SECURE_SETTINGS`, turn the switch on, tap Allow, readings appear with no `tcpip` | NOT TESTED | |
-| Reboot, open CafeQuest, tap Allow, readings return | NOT TESTED | |
-| Deny the dialog: card shows the pending reason and reconnects do not re-prompt | NOT TESTED | |
-| Switch off: Wireless Debugging turns off on a headset where the agent enabled it | NOT TESTED | |
-| Switch off with Wireless Debugging enabled by hand: it stays on | NOT TESTED | |
-| Run without the grant: card shows *One-time setup missing on this headset* | NOT TESTED | |
-| Headset with legacy `adb tcpip 5555` and Wireless Debugging off still shows readings | NOT TESTED | |
+| Grant `WRITE_SECURE_SETTINGS`, restart the agent with monitoring on: readings appear with no `tcpip` | PASS | Wireless Debugging went on within 15 s of the agent starting, readings (Left 100% inactive, Right 80% inactive, matching `dumpsys`) appeared on the next cycle; `service.adb.tcp.port` stayed 0 |
+| Reboot, open CafeQuest, tap Allow, readings return | PASS | After `adb reboot` Wireless Debugging was 0 and the agent was not running (no autostart). Opening CafeQuest raised the dialog (trust is lost on reboot); the toggle off/on re-armed a second request and **Allow** switched the setting to 1. Readings (Left 100% active, Right 80% active) appeared on the next poll, about 60 s after the tap |
+| Deny the dialog: card shows the pending reason and reconnects do not re-prompt | PASS | The dialog was left unanswered until it timed out, which behaves as a denial: setting stayed 0, the card kept the last values as stale with `wireless_debugging_off`. Restarting the agent with monitoring still on raised no second dialog (the agent had recorded the request for this boot); switching monitoring off and on re-armed it |
+| Switch off: Wireless Debugging turns off on a headset where the agent enabled it | PASS | Setting 1 → 0 within 4 s, mDNS entry gone, card back to headset battery only; switching on again in the same boot re-enabled it silently |
+| Switch off with Wireless Debugging enabled by hand: it stays on | PASS | Setting stayed 1 after monitoring on then off |
+| Run without the grant: card shows the setup reason | PASS | `pm revoke`, switch on: card reached `agent_permission_missing` on the next cycle (it first showed `wireless_debugging_off` for one cycle until the agent's telemetry caught up) |
+| Headset with legacy `adb tcpip 5555` and Wireless Debugging off still shows readings | PASS | Grant revoked, `adb tcpip 5555`: readings appeared on the next cycle, reason cleared, no hint |
+
+Observed, not failures:
+
+- After the switch is turned on, the first poll runs before the headset's TLS
+  service is up, so the card can show *Couldn't connect to the headset over ADB*
+  for up to one poll interval (about 60 s) before the first reading arrives.
+- The same wait follows an **Allow** tap: the card keeps showing *Tap Allow on
+  the headset to turn on Wireless Debugging* for up to about 60 s after the
+  person has already tapped it, until the next poll.
+- The agent records ownership of Wireless Debugging when it *asks*, not when the
+  person approves. After a denied or timed-out dialog in the same boot, a
+  setting that staff then enabled by hand would be switched off when monitoring
+  is turned off. Rare; not covered by a test.
 
 ## Optional controller batteries, 2026-10-09
 
