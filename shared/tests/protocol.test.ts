@@ -19,6 +19,8 @@ import {
   MAX_CAST_SDP_CHARS,
   MAX_CAST_ICE_CANDIDATE_CHARS,
   SCREEN_CAST_CAPABILITY,
+  ControllerMonitoringSchema,
+  CONTROLLER_MONITORING_CAPABILITY,
 } from "../src/protocol.js";
 import { parseAgentMessage } from "../src/parse.js";
 
@@ -404,4 +406,47 @@ test("legacy launch and telemetry messages still parse unchanged", () => {
   };
   assert.equal(ServerCommandSchema.safeParse(launch).success, true);
   assert.equal(parseAgentMessage(JSON.stringify(telemetry)).ok, true);
+});
+
+test("controller_monitoring accepts exactly a boolean in the v1 envelope", () => {
+  const frame = { type: "controller_monitoring", protocolVersion: 1, enabled: true };
+  assert.equal(ControllerMonitoringSchema.safeParse(frame).success, true);
+  assert.equal(ControllerMonitoringSchema.safeParse({ ...frame, enabled: false }).success, true);
+  for (const bad of [
+    { ...frame, enabled: "true" },
+    { ...frame, enabled: 1 },
+    { ...frame, enabled: null },
+    { type: frame.type, protocolVersion: 1 },
+    { ...frame, protocolVersion: 2 },
+    { ...frame, type: "controller_monitor" },
+  ]) {
+    assert.equal(ControllerMonitoringSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("hello accepts controller_monitoring_v1 beside the other capabilities", () => {
+  assert.equal(CONTROLLER_MONITORING_CAPABILITY, "controller_monitoring_v1");
+  const parsed = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package", "screen_cast_v1", CONTROLLER_MONITORING_CAPABILITY],
+  });
+  assert.equal(parsed.success, true);
+});
+
+test("telemetry carries wirelessDebugging, and an unknown value never rejects the frame", () => {
+  for (const state of ["on", "off", "not_permitted"] as const) {
+    const parsed = parseAgentMessage(JSON.stringify({ ...telemetry, wirelessDebugging: state }));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok && parsed.value.type === "telemetry") assert.equal(parsed.value.wirelessDebugging, state);
+  }
+  // Absent stays absent: older agents never send it.
+  const absent = parseAgentMessage(JSON.stringify(telemetry));
+  assert.equal(absent.ok, true);
+  if (absent.ok && absent.value.type === "telemetry") assert.equal(absent.value.wirelessDebugging, undefined);
+  // A future value must not cost the headset its liveness refresh.
+  for (const future of ["paired", "", 7, null, { state: "on" }]) {
+    const parsed = parseAgentMessage(JSON.stringify({ ...telemetry, wirelessDebugging: future }));
+    assert.equal(parsed.ok, true, JSON.stringify(future));
+    if (parsed.ok && parsed.value.type === "telemetry") assert.equal(parsed.value.wirelessDebugging, undefined);
+  }
 });

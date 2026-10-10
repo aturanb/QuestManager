@@ -4,6 +4,8 @@ export const PROTOCOL_VERSION = 1;
 export const LAUNCH_ANDROID_PACKAGE_CAPABILITY = "launch_android_package" as const;
 /** Capability that gates the one-headset live-view feature; older agents omit it. */
 export const SCREEN_CAST_CAPABILITY = "screen_cast_v1" as const;
+/** Capability that gates the server → agent monitoring frame; older agents omit it. */
+export const CONTROLLER_MONITORING_CAPABILITY = "controller_monitoring_v1" as const;
 /** Signaling bounds keep every relayed frame small; SDP is the largest payload. */
 export const MAX_CAST_SDP_CHARS = 65_536;
 export const MAX_CAST_ICE_CANDIDATE_CHARS = 4_096;
@@ -49,6 +51,9 @@ export const UsageStateSchema = z.object({
   foregroundApp: ForegroundAppSchema.nullable().optional().default(null),
 });
 
+/** Agent-reported Horizon OS Wireless Debugging state; used only for advisory UI hints. */
+export const WirelessDebuggingSchema = z.enum(["on", "off", "not_permitted"]);
+
 export const TelemetrySchema = z.object({
   type: z.literal("telemetry"),
   protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -60,6 +65,9 @@ export const TelemetrySchema = z.object({
   // explicitNulls=false. Accept omission so battery/liveness still work.
   expectedCurrentGame: ExpectedGameSchema.nullable().optional().default(null),
   usage: UsageStateSchema.optional(),
+  // Advisory only. An unknown future value drops the field instead of rejecting
+  // the frame, because a rejected telemetry frame would stop the liveness refresh.
+  wirelessDebugging: WirelessDebuggingSchema.optional().catch(undefined),
 });
 
 export const InstalledAppSchema = z.object({
@@ -217,6 +225,13 @@ export const CastStopSchema = z.object({
   reason: CastStopReasonSchema,
 });
 
+/** Server → agent: the monitoring flag; the agent turns Wireless Debugging on or off for it. */
+export const ControllerMonitoringSchema = z.object({
+  type: z.literal("controller_monitoring"),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
+  enabled: z.boolean(),
+});
+
 /** Browser viewer → server: answers and ICE only; the viewer never offers. */
 export const ViewerCastSignalSchema = z.object({
   type: z.literal("cast_signal"),
@@ -299,6 +314,8 @@ export const ServerErrorSchema = z.object({
 export type Hello = z.infer<typeof HelloSchema>;
 export type AgentCapability = z.infer<typeof AgentCapabilitySchema>;
 export type Telemetry = z.infer<typeof TelemetrySchema>;
+export type WirelessDebuggingState = z.infer<typeof WirelessDebuggingSchema>;
+export type ControllerMonitoring = z.infer<typeof ControllerMonitoringSchema>;
 export type InstalledApp = z.infer<typeof InstalledAppSchema>;
 export type InstalledApps = z.infer<typeof InstalledAppsSchema>;
 export type CommandAck = z.infer<typeof CommandAckSchema>;
