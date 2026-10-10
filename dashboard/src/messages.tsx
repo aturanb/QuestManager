@@ -215,13 +215,12 @@ const en = {
       REQUEST_FAILED: "Couldn't start the live view.",
     } satisfies Record<CastFailureCode | CastRequestError, string>,
   },
-  // Optional controller diagnostics. "Off" stops CafeQuest's own ADB reads; it
-  // never claims to change Wireless Debugging inside Horizon OS.
+  // Optional controller diagnostics. On asks each headset to enable Wireless Debugging; off switches it back off where CafeQuest enabled it.
   controller: {
     label: "Controller batteries",
     switchLabel: "Controller battery monitoring",
     help:
-      "Reads the left and right Touch controller levels over wireless ADB. Off stops CafeQuest reading them; it does not change Wireless Debugging on the headsets.",
+      "Reads the left and right Touch controller levels over wireless ADB. On asks each headset to turn on Wireless Debugging (tap Allow on the headset once after a reboot); off turns it back off where CafeQuest turned it on.",
     pending: "Saving…",
     error: "Couldn't change controller battery monitoring.",
     ready: "ADB ready",
@@ -246,6 +245,8 @@ const en = {
       headset_offline: "The headset is not connected",
       no_wireless_address: "No wireless ADB address for this headset",
       adb_connect_failed: "Couldn't connect to the headset over ADB",
+      wireless_debugging_off: "Tap Allow on the headset to turn on Wireless Debugging",
+      agent_permission_missing: "One-time setup missing on this headset",
       dump_failed: "The headset didn't answer the controller query",
       parse_failed: "The controller reading was in an unknown format",
     } satisfies Record<NonNullable<ControllerBatteryReason>, string>,
@@ -473,7 +474,7 @@ const tr: Messages = {
     label: "Kontrolcü pilleri",
     switchLabel: "Kontrolcü pili izleme",
     help:
-      "Sol ve sağ Touch kontrolcü seviyelerini kablosuz ADB üzerinden okur. Kapalıyken CafeQuest okumayı durdurur; gözlüklerdeki Kablosuz Hata Ayıklama ayarını değiştirmez.",
+      "Sol ve sağ Touch kontrolcü seviyelerini kablosuz ADB üzerinden okur. Açıkken her gözlükten Kablosuz Hata Ayıklama'yı açması istenir (yeniden başlatmadan sonra gözlükte bir kez İzin ver'e dokunun); kapatınca CafeQuest'in açtığı yerlerde tekrar kapatılır.",
     pending: "Kaydediliyor…",
     error: "Kontrolcü pili izleme değiştirilemedi.",
     ready: "ADB hazır",
@@ -498,6 +499,8 @@ const tr: Messages = {
       headset_offline: "Gözlük bağlı değil",
       no_wireless_address: "Bu gözlük için kablosuz ADB adresi yok",
       adb_connect_failed: "Gözlüğe ADB ile bağlanılamadı",
+      wireless_debugging_off: "Kablosuz hata ayıklamayı açmak için gözlükte İzin ver'e dokunun",
+      agent_permission_missing: "Bu gözlükte tek seferlik kurulum eksik",
       dump_failed: "Gözlük kontrolcü sorgusunu yanıtlamadı",
       parse_failed: "Kontrolcü okuması bilinmeyen bir biçimde geldi",
     },

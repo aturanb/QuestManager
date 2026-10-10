@@ -149,6 +149,12 @@ function ControllerBadges({
   const stale = battery.status === "stale";
   // Only ever shown for a reading that exists: "Updated never" would be noise.
   const updated = battery.observedAt ? formatAgo(battery.observedAt, now, serverOffsetMs, t.time) : null;
+  // With no reading at all the reason is shown as text, so staff see the action
+  // without hovering. An offline headset is already obvious from its card.
+  const hint =
+    !battery.left && !battery.right && battery.reason && battery.reason !== "headset_offline"
+      ? c.reasons[battery.reason]
+      : null;
   return (
     <span className="controllers" role="group" aria-label={c.group(name)}>
       {hands.map(({ key, short, word }) => {
@@ -177,6 +183,7 @@ function ControllerBadges({
           </span>
         );
       })}
+      {hint && <span className="controller-hint">{hint}</span>}
       {updated && <span className="controller-updated">{c.updated(updated)}</span>}
     </span>
   );

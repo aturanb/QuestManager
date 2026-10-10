@@ -270,6 +270,7 @@ code {
 .controller-badge[data-state="stale"] { border-style: dashed; }
 .controller-last { margin-left: 4px; font-weight: 500; font-size: 0.6875rem; }
 .controller-updated { font-size: 0.75rem; color: var(--chalk-dim); white-space: nowrap; }
+.controller-hint { flex-basis: 100%; text-align: right; font-size: 0.75rem; color: var(--chalk-dim); }
 
 /* ---- controls ------------------------------------------------------------- */
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }

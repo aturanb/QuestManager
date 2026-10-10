@@ -10,9 +10,9 @@ export type ControllerBatteryToggleProps = {
 };
 
 /**
- * The one global switch for optional controller-battery monitoring. It controls
- * CafeQuest's own ADB collection only — the help text says plainly that it does
- * not touch Wireless Debugging inside Horizon OS.
+ * The one global switch for optional controller-battery monitoring. Turning it
+ * on asks each headset to enable Wireless Debugging; turning it off switches it
+ * off again where CafeQuest enabled it.
  */
 export function ControllerBatteryToggle({ state, pending, error, onChange }: ControllerBatteryToggleProps) {
   const { t } = useI18n();

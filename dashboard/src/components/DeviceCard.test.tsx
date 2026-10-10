@@ -637,4 +637,62 @@ describe("DeviceCard controller batteries", () => {
       "Kontrolcü okuması bilinmeyen bir biçimde geldi"
     );
   });
+
+  it("shows the Wireless Debugging action as visible text, not only a tooltip", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "wireless_debugging_off" },
+      }),
+    })} />);
+    expect(screen.getByText("Tap Allow on the headset to turn on Wireless Debugging")).toBeInTheDocument();
+  });
+
+  it("shows the missing one-time setup as visible text", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "agent_permission_missing" },
+      }),
+    })} />);
+    expect(screen.getByText("One-time setup missing on this headset")).toBeInTheDocument();
+  });
+
+  it("keeps an offline headset quiet: no visible hint for headset_offline", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        online: false,
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "headset_offline" },
+      }),
+    })} />);
+    expect(screen.queryByText("The headset is not connected")).not.toBeInTheDocument();
+  });
+
+  it("adds no hint beside an existing reading", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        controllerBattery: {
+          left: { level: 95, state: "inactive" },
+          right: { level: 75, state: "inactive" },
+          observedAt: at(4 * 60_000),
+          status: "stale",
+          reason: "wireless_debugging_off",
+        },
+      }),
+    })} />);
+    expect(screen.queryByText("Tap Allow on the headset to turn on Wireless Debugging")).not.toBeInTheDocument();
+  });
+
+  it("speaks Turkish for both new hints", () => {
+    const { rerender } = renderTurkish(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "wireless_debugging_off" },
+      }),
+    })} />);
+    expect(screen.getByText("Kablosuz hata ayıklamayı açmak için gözlükte İzin ver'e dokunun")).toBeInTheDocument();
+    rerender(<DeviceCard {...props({
+      device: device({
+        controllerBattery: { left: null, right: null, observedAt: null, status: "unavailable", reason: "agent_permission_missing" },
+      }),
+    })} />);
+    expect(screen.getByText("Bu gözlükte tek seferlik kurulum eksik")).toBeInTheDocument();
+  });
 });

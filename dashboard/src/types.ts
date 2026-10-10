@@ -42,6 +42,8 @@ export type ControllerBatteryReason =
   | "headset_offline"
   | "no_wireless_address"
   | "adb_connect_failed"
+  | "wireless_debugging_off"
+  | "agent_permission_missing"
   | "dump_failed"
   | "parse_failed";
 export type DeviceControllerBattery = {

@@ -17,7 +17,7 @@ describe("ControllerBatteryToggle", () => {
     const toggle = screen.getByRole("switch", { name: "Controller battery monitoring" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     // The help text is exposed, not just visual: it names the ADB boundary.
-    expect(toggle).toHaveAccessibleDescription(/does not change Wireless Debugging/i);
+    expect(toggle).toHaveAccessibleDescription(/turn on Wireless Debugging/i);
     expect(screen.getByText("Controller batteries")).toBeInTheDocument();
   });
 

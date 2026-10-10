@@ -98,8 +98,9 @@ export function requestCast(key: string, deviceId: string): Promise<{ sessionId:
 }
 
 /**
- * The global controller-battery switch. It controls CafeQuest's own ADB
- * collection only: it never enables or disables headset Wireless Debugging.
+ * The global controller-battery switch. Turning it on asks each headset to
+ * enable Wireless Debugging; turning it off switches it off again where
+ * CafeQuest enabled it.
  */
 export function setControllerBatteryMonitoring(
   key: string,
