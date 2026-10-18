@@ -97,22 +97,20 @@ the refresh must apply without restarting the server mid-shift. A single-flight
 lock keeps a double-clicked button to one download; any failure (network, HTTP,
 shape, <1000 valid records) leaves the previous cache file untouched.
 
-## Sideloaded apps launch by Android package ID
+## Installed apps launch by Android package ID
 
-Decision: launch commands carry exactly one target: a numeric Meta App ID for
-catalog/manual matches, or an Android package ID for unmatched installed apps.
-The agent reports itself in the non-system inventory and uses the package's
-Leanback/launcher activity for the Android path.
+Decision: launch commands carry exactly one target. A current agent receives an
+Android package ID for any app in its reported inventory, including catalog and
+manual matches, and resolves the package's Leanback/launcher activity. A
+catalog/manual numeric Meta App ID remains the fallback for older agents.
 
 The package target is an additive protocol-v1 capability. Agent 0.4 advertises
 `launch_android_package` in its hello; an older connected agent receives an
 immediate `agent_update_required` response instead of a command it would ignore.
 
-Reason: sideloaded apps may have no Meta App ID at all. The community GitHub
-catalog remains valuable for identifying official apps and preserving Meta's
-supported `launchOtherApp` path, but it must not block a locally installed app.
-The direct Android launch path remains `UNVERIFIED_HARDWARE` until
-`docs/morning-test.md` row 5a passes.
+Reason: a locally installed app must not be blocked by missing or failing Meta
+entitlement checks. The community GitHub catalog remains valuable for
+identifying official apps and preserving a compatibility fallback.
 
 ## Agent setup defaults are baked in at build time
 

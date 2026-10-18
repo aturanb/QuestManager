@@ -118,13 +118,14 @@ TCP ADB was prepared over USB (`adb tcpip 5555`, see docs/quest-setup.md).
   PC's IP.
 - **META_APP_ID_NOT_CONFIGURED**: CafeQuest's own Dashboard App ID is missing
   from the headset setup screen.
-- **Launch fails**: game not installed/entitled, or a target game's Meta App ID
-  is still a placeholder in `cafequest.config.json`.
+- **Launch fails**: confirm the app is installed and listed by that headset.
+  Current agents launch listed apps by Android package; a legacy Meta fallback
+  can still fail when the account is not entitled or the App ID is wrong.
 - **Installed list missing**: reinstall the newly built APK, then tap
   **Reconnect** in CafeQuest. Inventory is scanned once per connection.
-- **Sideloaded app will not launch**: expand **Installed app IDs** and confirm
-  the Android package ID is present. A Meta App ID is optional; add one only if
-  the app is registered with Meta and direct package launch is unsuitable.
+- **Installed app will not launch**: expand **Installed app IDs** and confirm
+  the Android package ID is present. A Meta App ID is optional compatibility
+  metadata for older agents.
 - **Meta login/entitlement prompt**: sign the test Meta account into the
   headset and entitle the game to it.
 - **Live view never starts**: nobody approved on the headset, the two devices are

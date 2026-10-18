@@ -386,7 +386,8 @@ export async function buildApp(cfg: AppConfig) {
     if (!hub.isDeviceConnected(deviceId)) {
       return reply.code(409).send({ error: "headset offline", detail: "device not connected" });
     }
-    if (!resolved.metaAppId && !hub.supportsPackageLaunch(deviceId)) {
+    const supportsPackageLaunch = hub.supportsPackageLaunch(deviceId);
+    if (!resolved.metaAppId && !supportsPackageLaunch) {
       return reply.code(409).send({
         error: "agent_update_required",
         detail: "connected agent did not advertise Android package launching",
@@ -395,9 +396,9 @@ export async function buildApp(cfg: AppConfig) {
     const commandId = hub.queueLaunch(deviceId, {
       gameId: `installed:${resolved.packageName}`,
       name: resolved.name,
-      ...(resolved.metaAppId
-        ? { metaAppId: resolved.metaAppId }
-        : { packageName: resolved.packageName }),
+      ...(supportsPackageLaunch
+        ? { packageName: resolved.packageName }
+        : { metaAppId: resolved.metaAppId! }),
     });
     if (!commandId) return reply.code(409).send({ error: "headset offline" });
     return reply.code(202).send({ commandId, status: "sent" });
@@ -415,7 +416,8 @@ export async function buildApp(cfg: AppConfig) {
     if (game.packageName && !getDeviceApp(db, deviceId, game.packageName)) {
       return reply.code(400).send({ error: "app_not_installed" });
     }
-    if (isPlaceholderAppId(game.metaAppId)) {
+    const supportsPackageLaunch = !!game.packageName && hub.supportsPackageLaunch(deviceId);
+    if (isPlaceholderAppId(game.metaAppId) && !supportsPackageLaunch) {
       return reply.code(400).send({
         error: "game_meta_app_id_not_configured",
         detail: `game "${game.name}" still has a placeholder Meta App ID; set a real one in cafequest.config.json or via PUT /api/games/${game.id}`,
@@ -427,7 +429,9 @@ export async function buildApp(cfg: AppConfig) {
     const commandId = hub.queueLaunch(deviceId, {
       gameId: game.id,
       name: game.name,
-      metaAppId: game.metaAppId,
+      ...(supportsPackageLaunch
+        ? { packageName: game.packageName! }
+        : { metaAppId: game.metaAppId }),
     });
     if (!commandId) {
       return reply.code(409).send({ error: "headset offline", detail: "device disconnected before send" });

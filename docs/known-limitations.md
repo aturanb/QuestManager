@@ -62,10 +62,9 @@
   identify official Meta apps. On a café LAN with no WAN access it fails and
   keeps the mappings already cached; unmatched apps remain launchable by their
   Android package ID.
-- **Direct package launch still needs a physical Quest check**: the agent uses
-  Android's Leanback/launcher intent for apps without a Meta App ID. Unit tests
-  cover routing and errors, but Quest background-activity policy may differ;
-  morning-test row 5a is the acceptance check. Installed helper/service APKs
+- **Direct package launch needs a front-door activity**: the agent uses
+  Android's Leanback/launcher intent for installed apps. The physical Quest 3
+  check passed with Breachers on 2026-10-10. Installed helper/service APKs
   without a front-door activity remain visible but fail with
   `TARGET_NOT_LAUNCHABLE` when selected.
 - **Model is whatever the headset reports**: the card's **Model** row shows
@@ -74,8 +73,9 @@
   simulator always reports "Quest 3".
 - **Turkish covers CafeQuest's own words**: game and device names, server
   error details for codes the dashboard does not know, agent error codes
-  (`META_APP_ID_NOT_CONFIGURED`) and Meta SDK messages are shown as sent, after
-  a Turkish lead-in such as "Açılamadı: …". The language pick is per browser
+  (`META_APP_ID_NOT_CONFIGURED`) and unknown Meta SDK messages are shown as
+  sent, after a Turkish lead-in such as "Açılamadı: …". Meta entitlement code
+  3 has a localized actionable explanation. The language pick is per browser
   and per headset, not café-wide.
 - **Discovery needs one broadcast domain**: headsets find the server only on
   the same subnet, through an access point that passes broadcasts, with inbound

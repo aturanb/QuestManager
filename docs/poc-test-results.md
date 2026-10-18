@@ -175,6 +175,21 @@ in its own inventory (the README says so too). The assertion has been in the
 test since the original agent commit and the scanner never excluded itself, so
 this is a pre-existing red test, untouched by the live-view work.
 
+## Installed-app package launch, 2026-10-10
+
+Quest model: Quest 3 (adb serial `2G0YC5ZG8106W2`)
+Agent version: 0.7.0
+Server branch: `cafequest-poc` working tree
+
+The request used the dashboard's exact endpoint with body
+`{"packageName":"com.TriangleFactory.Breachers"}`. Because agent 0.7.0
+advertised `launch_android_package`, the server selected the package target
+instead of catalog Meta App ID `5740397619319389`.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Installed-app launch | PASS | Quest 01 acknowledged command `9fc83231-0c3c-4cdf-965a-07f5a074ffd2`, returned `success` with no error, and then reported `com.TriangleFactory.Breachers` as its foreground package. |
+
 ---
 
 ## CafeQuest POC Results (2026-10-08 run)
@@ -195,7 +210,6 @@ Date: 2026-10-08
 | Usage access | PASS | `usageAccessGranted: true` after `adb shell appops set com.cafequest.agent GET_USAGE_STATS allow`. |
 | Current game detection | PASS | After two bugs fixed (below), the snapshot showed `Breachers` with a stable `startedAt` and a climbing duration (8s → 13s), clearing to none when the game actually paused. |
 | Foreground app launch | PASS | `launch-installed` for `com.TriangleFactory.Breachers` → `command_result: success`, game opened on the headset. This is the fix for launches previously reported as failed. |
-| Sideloaded Android package launch | NOT TESTED | Package-target protocol, dashboard selection and agent launch routing are unit-tested; physical Quest background launch remains morning-test row 5a. |
 | Background heartbeat | PASS | Telemetry kept flowing for minutes while Breachers was the resumed app. |
 | Background command reception | PASS | A launch command sent while Breachers was already in the foreground was acked and completed `success`. |
 | Catalog refresh | PASS | `GET /api/catalog` reported 18,034 mappings; a live CLI refresh stored 18,100. |

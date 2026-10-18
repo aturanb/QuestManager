@@ -185,8 +185,10 @@ code {
 }
 
 /* ---- the board ------------------------------------------------------------ */
-.shell { max-width: 1680px; margin: 0 auto; padding: 16px var(--gutter) 32px; }
-.board { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+/* A mouse at the counter gets denser controls, so the whole floor fits one screen; touch keeps 44px. */
+.shell { --tap: 36px; max-width: 1680px; margin: 0 auto; padding: 16px var(--gutter) 32px; }
+@media (pointer: coarse) { .shell { --tap: 44px; } }
+.board { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
 
 .selection-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
 .selection-count { color: var(--chalk-dim); font-size: 0.875rem; font-weight: 650; }
@@ -197,13 +199,15 @@ code {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 16px 16px 22px;
+  gap: 8px;
+  padding: 12px 14px 12px 19px;
   background: var(--bay);
   border: 1px solid var(--rail);
   border-radius: var(--r-bay);
   overflow: hidden;
   scroll-margin-top: calc(var(--head) + 12px);
+  /* The clock and the facts size to the bay, not the window. */
+  container-type: inline-size;
 }
 /* The state edge: readable from across the room before any text is. */
 .bay::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--state); }
@@ -219,34 +223,93 @@ code {
 .bay:target { animation: arrive 1.4s ease-out 1; }
 @keyframes arrive { from { box-shadow: 0 0 0 3px var(--state); } to { box-shadow: 0 0 0 3px transparent; } }
 
-.bay-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.bay-title { display: flex; align-items: center; min-width: 0; }
-.bay-select { display: grid; place-items: center; width: var(--tap); height: var(--tap); margin: -10px 2px -10px -10px; cursor: pointer; }
-.bay-select input { width: 20px; height: 20px; margin: 0; accent-color: var(--ready); cursor: pointer; }
+/* Name, rename and link state share one line. Pieces move whole: the name truncates
+   and the link state drops below before anything breaks mid-word. */
+.bay-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-height: 28px; }
+.bay-title { display: flex; flex: 1 1 auto; align-items: center; gap: 2px; min-width: 0; }
+/* The hit area stays a full tap target; negative margins keep it from heightening the line. */
+.bay-select {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  margin: calc((28px - var(--tap)) / 2) 0 calc((28px - var(--tap)) / 2) -8px;
+  cursor: pointer;
+}
+.bay-select input { width: 18px; height: 18px; margin: 0; accent-color: var(--ready); cursor: pointer; }
 .action-scope { color: var(--ready); font-size: 0.8125rem; font-weight: 650; }
-.bay-head h2 { font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
-.rename-btn { margin-left: 12px; }
-.rename-btn:hover { color: var(--chalk); }
-.rename-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.rename-form input { flex: 1 1 9rem; min-width: 0; }
-.link-state { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--chalk-dim); white-space: nowrap; }
+.bay-head h2 { min-width: 0; overflow: hidden; font-size: 1.0625rem; font-weight: 650; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--chalk-dim);
+  cursor: pointer;
+}
+.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn:hover { background: var(--raised); color: var(--chalk); }
+/* Touch: full-size targets overhang the line vertically, so a dropped link state keeps clear of them. */
+@media (pointer: coarse) {
+  .bay-head { row-gap: 8px; }
+  .icon-btn { width: var(--tap); height: var(--tap); margin-block: calc((28px - var(--tap)) / 2); }
+}
+.rename-form { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rename-form input { flex: 1 1 8rem; min-width: 0; }
+.link-state { display: flex; flex: none; align-items: center; gap: 6px; margin-left: auto; font-size: 0.8125rem; color: var(--chalk-dim); white-space: nowrap; }
 .link-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
 .bay[data-online="true"] .link-state::before { background: var(--ready); }
 
-.readout { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-height: 96px; }
-.clock { font-size: clamp(2.75rem, 2.3rem + 1.6vw, 3.5rem); line-height: 1; font-weight: 650; letter-spacing: -0.035em; }
+/* Clock and caption read as one line, the meter under both. The minimum height is the
+   running clock's, so every bay's facts start on the same line across the board. */
+.readout {
+  --clock: clamp(2.25rem, 1.5rem + 4cqi, 2.75rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: center;
+  gap: 2px 10px;
+  min-height: calc(var(--clock) + 14px);
+}
+.clock { font-size: var(--clock); line-height: 1; font-weight: 650; letter-spacing: -0.035em; }
 .bay[data-state="ending"] .clock { color: var(--alert); }
-.word { font-size: clamp(2rem, 1.75rem + 1vw, 2.5rem); line-height: 1.05; font-weight: 650; letter-spacing: -0.025em; color: var(--state); }
+.word { font-size: clamp(1.625rem, 1.1rem + 3cqi, 2rem); line-height: 1.1; font-weight: 650; letter-spacing: -0.025em; color: var(--state); }
 .caption { font-size: 0.875rem; color: var(--chalk-dim); }
-.meter { height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.meter { flex-basis: 100%; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
 .meter span { display: block; height: 100%; border-radius: inherit; background: var(--state); transition: width 1s linear; }
 
-.facts { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--rail); }
-.facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.facts dt { font-size: 0.875rem; color: var(--chalk-dim); white-space: nowrap; }
-.facts dd { font-weight: 550; text-align: right; overflow-wrap: anywhere; }
+/* Labels share one column and values the next, so a long value wraps inside its own
+   column instead of into its label. Model joins Battery's row while the bay is wide enough. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content fit-content(9rem);
+  align-items: baseline;
+  gap: 4px 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rail);
+}
+.facts > div { display: contents; }
+.facts dt { grid-column: 1; font-size: 0.8125rem; color: var(--chalk-dim); white-space: nowrap; }
+.facts dd { grid-column: 2 / -1; min-width: 0; font-size: 0.875rem; font-weight: 550; overflow-wrap: anywhere; }
+.facts .fact-battery dd { grid-column: 2; }
+.facts .fact-model dt { grid-column: 3; }
+.facts .fact-model dd { grid-column: 4; }
+@container (max-width: 299px) {
+  .facts .fact-battery dd, .facts .fact-model dd { grid-column: 2 / -1; }
+  .facts .fact-model dt { grid-column: 1; }
+}
 
-.battery { display: inline-flex; align-items: center; gap: 8px; }
+/* Baseline on the percentage, so it lines up with its label; the cells just sit centered.
+   In a narrow bay "charging" wraps under the percentage rather than into Model. */
+.battery { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.battery .cells { align-self: center; }
+.battery .pct, .charging { white-space: nowrap; }
 .cells { position: relative; display: inline-flex; gap: 2px; padding: 2px; border: 1.5px solid var(--chalk-dim); border-radius: 4px; }
 .cells::after { content: ""; position: absolute; top: 50%; right: -4.5px; width: 2.5px; height: 6px; margin-top: -3px; border-radius: 0 1px 1px 0; background: var(--chalk-dim); }
 .cells i { width: 5px; height: 10px; border-radius: 1px; }
@@ -256,14 +319,16 @@ code {
 .battery[data-tone="low"] .pct { color: var(--alert); }
 .charging { font-size: 0.8125rem; font-weight: 400; color: var(--chalk-dim); }
 
-/* Controller badges sit inside the battery cell: compact, and never colour-only. */
-.controllers { display: inline-flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; margin-left: 8px; }
+/* Controller badges get their own row under the headset battery: compact, and never
+   colour-only. The update time and any hint wrap whole underneath the badges. */
+.controllers { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .controller-badge {
-  padding: 1px 6px;
+  padding: 0 6px;
   border: 1px solid var(--rail);
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 650;
+  line-height: 1.5;
   color: var(--chalk);
   white-space: nowrap;
 }
@@ -273,13 +338,14 @@ code {
 .controller-badge[data-state="unavailable"] { color: var(--chalk-dim); }
 .controller-badge[data-state="stale"] { border-style: dashed; }
 .controller-last { margin-left: 4px; font-weight: 500; font-size: 0.6875rem; }
-.controller-updated { font-size: 0.75rem; color: var(--chalk-dim); white-space: nowrap; }
-.controller-hint { flex-basis: 100%; text-align: right; font-size: 0.75rem; color: var(--chalk-dim); }
+.controller-updated { font-size: 0.75rem; font-weight: 500; color: var(--chalk-dim); }
+.controller-hint { flex-basis: 100%; font-size: 0.75rem; font-weight: 500; color: var(--chalk-dim); }
 
 /* ---- controls ------------------------------------------------------------- */
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.bay .controls { gap: 6px; }
 .controls.start, .controls.session { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.controls.start .custom { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.controls.start .custom { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
 /* Room for a typed length first: on the narrowest phones Unlimited drops to its own line. */
 .controls.start .custom .minutes { flex-basis: 6rem; }
 /* An unlimited session has nothing to extend: Stop takes the whole row. */
@@ -351,11 +417,21 @@ input::placeholder { color: var(--chalk-dim); }
 .note { padding: 8px 10px; border-radius: var(--r-ctl); background: var(--raised); font-size: 0.875rem; font-weight: 550; color: var(--chalk-dim); }
 .note[data-tone="ok"] { color: var(--ready); }
 .note[data-tone="bad"] { background: #33212a; color: #ff8a8a; }
+.bay .note { padding: 6px 10px; font-size: 0.8125rem; }
+
+/* ---- occasional tools: app IDs, removal, live view ------------------------- */
+/* One line at the foot of the bay. Each piece wraps whole, live view keeps the right
+   edge, and an opened panel or removal question takes the full width below. */
+.bay-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--rail); }
+.bay-tools .live-view { margin-left: auto; }
+.bay-tools .live-view .btn { padding: 0 10px; font-size: 0.8125rem; }
+.bay-tools .remove-btn { font-size: 0.8125rem; }
+.bay-tools .confirm { flex-basis: 100%; order: 1; }
 
 /* ---- installed app identifiers and optional Meta mapping ------------------ */
-.inventory { font-size: 0.8125rem; color: var(--chalk-dim); }
-.app-id-list { padding-top: 10px; border-top: 1px solid var(--rail); }
-.app-id-list summary { padding: 4px 0; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
+.app-id-list[open] { flex-basis: 100%; }
+.app-id-list summary { padding: 4px 0; font-size: 0.8125rem; font-weight: 600; color: var(--chalk-dim); white-space: nowrap; cursor: pointer; }
+.app-id-list summary:hover, .app-id-list[open] summary { color: var(--chalk); }
 .hint { margin: 6px 0 2px; font-size: 0.8125rem; color: var(--chalk-dim); }
 .mapping { display: grid; gap: 8px; padding: 10px 0; }
 .mapping + .mapping { border-top: 1px dashed var(--rail); }
@@ -372,15 +448,11 @@ input::placeholder { color: var(--chalk-dim); }
 .mapping-entry input { width: 100%; min-width: 0; }
 
 /* ---- removing a stale headset ---------------------------------------------- */
-.bay-foot { margin-top: auto; padding-top: 6px; border-top: 1px solid var(--rail); }
-.confirm { display: grid; gap: 10px; padding-top: 6px; }
+.confirm { display: grid; gap: 8px; padding-top: 4px; }
 .confirm p { font-size: 0.875rem; }
 .confirm .btn { flex: 1 1 0; }
 
 /* ---- live view -------------------------------------------------------------- */
-.controls.live-view { margin-top: 2px; }
-.controls.live-view .btn { flex: 1 1 0; }
-
 .cast-panel {
   position: fixed;
   right: var(--gutter);
@@ -463,8 +535,6 @@ input::placeholder { color: var(--chalk-dim); }
 .keyprompt input { flex: 1 1 auto; min-width: 0; }
 
 @media (max-width: 480px) {
-  .bay { padding: 14px 14px 14px 19px; }
-  .readout { min-height: 84px; }
   .keyprompt { padding: 22px 18px; }
   .keyprompt form { flex-direction: column; }
   .cast-panel { padding: 16px; }

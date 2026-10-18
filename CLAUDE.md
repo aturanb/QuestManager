@@ -207,6 +207,9 @@ The sideloaded agent reports its non-system packages once per connection (max
 `server/data/app-catalog.json` cache, falling back to five hard-verified
 mappings. A manual dashboard correction is stored as a `games` row carrying
 `package_name` with id `installed-<sha256(pkg)[0:16]>` and wins over the catalog.
+Current agents launch reported installed apps by Android package ID. Catalog
+and manual Meta App IDs remain metadata and a fallback for older agents that do
+not advertise `launch_android_package`.
 
 **Never invent a Meta App ID.** Unconfigured games keep `FILL_*` /
 `UNCONFIGURED` placeholders, and launches against them are rejected with

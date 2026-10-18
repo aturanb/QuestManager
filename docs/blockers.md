@@ -2,11 +2,13 @@
 
 ## Meta Platform runtime initialization
 
-Status: BLOCKED_EXTERNAL (until the human supplies values)
+Status: OPTIONAL_LEGACY_FALLBACK
 
-Reason: `launchOtherApp` needs a Meta Horizon Developer Dashboard App ID and
-real per-game Meta App IDs; the repository intentionally holds only
-`FILL_*` placeholders (§19 — never invent IDs).
+Reason: current agents launch reported installed apps by Android package and do
+not require per-game Meta App IDs. The legacy `launchOtherApp` fallback still
+needs a Meta Horizon Developer Dashboard App ID and real per-game Meta App IDs;
+the repository intentionally holds only `FILL_*` placeholders (§19 — never
+invent IDs).
 
 Work completed:
 - launch abstraction + ownership-checked command pipeline on the server
@@ -14,7 +16,7 @@ Work completed:
 - configuration supported via cafequest.config.json
 - placeholder launches rejected with `game_meta_app_id_not_configured`
 
-Human action:
+Legacy fallback setup (only when supporting older agents):
 1. Create a Meta developer app and record its Dashboard App ID in
    `cafequest.config.json` → `metaAppId`.
 2. Enter that same CafeQuest Dashboard App ID in every headset's CafeQuest

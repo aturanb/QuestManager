@@ -62,6 +62,24 @@ test("installed_apps inventory is persisted and catalog matches appear in snapsh
   assert.equal(installed[1].source, null);
 });
 
+test("a catalog-matched installed app launches by Android package on a capable agent", async () => {
+  const sentBeforeLaunch = sent.length;
+  const launch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${deviceId}/launch-installed`,
+    payload: { packageName: "com.TriangleFactory.Breachers" },
+  });
+
+  assert.equal(launch.statusCode, 202);
+  const command = sent
+    .slice(sentBeforeLaunch)
+    .map((value) => JSON.parse(value))
+    .find((value) => value.type === "command");
+  assert.equal(command.payload.packageName, "com.TriangleFactory.Breachers");
+  assert.equal(command.payload.gameName, "Breachers");
+  assert.equal("metaAppId" in command.payload, false);
+});
+
 test("an unmatched sideloaded app launches by Android package name", async () => {
   const sentBeforeLaunch = sent.length;
   const launch = await app.inject({
@@ -105,7 +123,64 @@ test("an older connected agent is told to update before a package launch", async
   assert.equal(launch.json().error, "agent_update_required");
 });
 
-test("admin can map an unknown installed package and launch it by package name", async () => {
+test("a catalog-matched app keeps the Meta fallback for an older agent", async () => {
+  const oldDeviceId = randomUUID();
+  upsertDevice(db, { id: oldDeviceId, name: "Older Quest", model: "Quest 3", agentVersion: "0.3.0" });
+  const oldSent: string[] = [];
+  const oldSocket = {
+    send(value: string) { oldSent.push(value); },
+    close() {},
+  };
+  hub.addAgentSocket(oldDeviceId, oldSocket as any);
+  hub.handleAgentMessage(oldDeviceId, oldSocket as any, JSON.stringify({
+    type: "installed_apps",
+    protocolVersion: 1,
+    deviceId: oldDeviceId,
+    scannedAt: "2026-10-09T12:00:00.000Z",
+    apps: [
+      { packageName: "com.TriangleFactory.Breachers", label: "Breachers", versionName: "1.0", versionCode: 1 },
+    ],
+  }));
+
+  const launch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${oldDeviceId}/launch-installed`,
+    payload: { packageName: "com.TriangleFactory.Breachers" },
+  });
+
+  assert.equal(launch.statusCode, 202);
+  const command = oldSent
+    .map((value) => JSON.parse(value))
+    .find((value) => value.type === "command");
+  assert.equal(command.payload.metaAppId, "5740397619319389");
+  assert.equal("packageName" in command.payload, false);
+
+  const configured = await app.inject({
+    method: "PUT",
+    url: "/api/games/legacy-breachers",
+    payload: {
+      name: "Breachers Legacy",
+      metaAppId: "5740397619319389",
+      packageName: "com.TriangleFactory.Breachers",
+    },
+  });
+  assert.equal(configured.statusCode, 200);
+  const sentBeforeConfiguredLaunch = oldSent.length;
+  const configuredLaunch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${oldDeviceId}/launch`,
+    payload: { gameId: "legacy-breachers" },
+  });
+  assert.equal(configuredLaunch.statusCode, 202);
+  const configuredCommand = oldSent
+    .slice(sentBeforeConfiguredLaunch)
+    .map((value) => JSON.parse(value))
+    .find((value) => value.type === "command");
+  assert.equal(configuredCommand.payload.metaAppId, "5740397619319389");
+  assert.equal("packageName" in configuredCommand.payload, false);
+});
+
+test("admin can map an unknown installed package without forcing Meta launch", async () => {
   const mapped = await app.inject({
     method: "PUT",
     url: `/api/devices/${deviceId}/apps/com.example.unknown`,
@@ -137,14 +212,29 @@ test("admin can map an unknown installed package and launch it by package name",
     .slice(sentBeforeLaunch)
     .map((value) => JSON.parse(value))
     .find((value) => value.type === "command");
-  assert.equal(command.payload.metaAppId, "1234567890123456");
+  assert.equal(command.payload.packageName, "com.example.unknown");
   assert.equal(command.payload.gameName, "My Local Game");
+  assert.equal("metaAppId" in command.payload, false);
+
+  const manualGame = getGameByPackage(db, "com.example.unknown");
+  assert.ok(manualGame);
+  const sentBeforeConfiguredLaunch = sent.length;
+  const configuredLaunch = await app.inject({
+    method: "POST",
+    url: `/api/devices/${deviceId}/launch`,
+    payload: { gameId: manualGame.id },
+  });
+  assert.equal(configuredLaunch.statusCode, 202);
+  const configuredCommand = sent
+    .slice(sentBeforeConfiguredLaunch)
+    .map((value) => JSON.parse(value))
+    .find((value) => value.type === "command");
+  assert.equal(configuredCommand.payload.packageName, "com.example.unknown");
+  assert.equal("metaAppId" in configuredCommand.payload, false);
 
   const otherDeviceId = randomUUID();
   upsertDevice(db, { id: otherDeviceId, name: "Other Quest", model: "Quest 3", agentVersion: "0.1.0" });
   hub.addAgentSocket(otherDeviceId, { send() {}, close() {} } as any);
-  const manualGame = getGameByPackage(db, "com.example.unknown");
-  assert.ok(manualGame);
   const crossDeviceLaunch = await app.inject({
     method: "POST",
     url: `/api/devices/${otherDeviceId}/launch`,

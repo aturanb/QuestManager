@@ -158,6 +158,22 @@ describe("DeviceCard", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Headset offline");
   });
 
+  it("turns Meta entitlement JSON into actionable launch feedback", () => {
+    render(<DeviceCard {...props({
+      device: device({
+        lastCommand: {
+          id: "c",
+          status: "failed",
+          error: '{"error":{"code":3,"message":"Error: Entitlement check failed."}}',
+        },
+      }),
+    })} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Failed: Meta couldn't verify access. Check that this headset's Meta account owns the app."
+    );
+  });
+
   it("lists catalog-matched installed apps and launches the selected package", () => {
     const p = props({
       device: device({
@@ -172,7 +188,7 @@ describe("DeviceCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Launch game on Quest 01" }));
     expect(p.onLaunchInstalled).toHaveBeenCalledWith("d1", "com.example.beta");
     expect(p.onLaunch).not.toHaveBeenCalled();
-    expect(screen.getByText("2 installed apps reported by this headset")).toBeInTheDocument();
+    expect(screen.getByText("Installed app IDs (2)")).toBeInTheDocument();
   });
 
   it("allows an unmatched installed package to be mapped manually", () => {
@@ -408,6 +424,11 @@ describe("DeviceCard in Turkish", () => {
   it.each([
     [{ id: "c1", status: "success", error: null }, "Açıldı ✓", "ok"],
     [{ id: "c1", status: "failed", error: "TARGET_NOT_INSTALLED" }, "Açılamadı: TARGET_NOT_INSTALLED", "bad"],
+    [
+      { id: "c1", status: "failed", error: '{"error":{"code":3,"message":"Error: Entitlement check failed."}}' },
+      "Açılamadı: Meta erişimi doğrulayamadı. Bu gözlükteki Meta hesabının uygulamaya sahip olduğunu kontrol edin.",
+      "bad",
+    ],
     [{ id: "c1", status: "timeout", error: null }, "Zaman aşımı", "bad"],
     [{ id: "c1", status: "sent", error: null }, "Açılıyor…", "wait"],
   ])("keeps the launch badge color when the words are Turkish (%j)", (lastCommand, text, tone) => {
@@ -454,7 +475,6 @@ describe("DeviceCard in Turkish", () => {
     });
     renderTurkish(<DeviceCard {...p} />);
     expect(screen.getByText("Alpha VR, 12:34 süredir")).toBeInTheDocument();
-    expect(screen.getByText("Bu gözlük 2 yüklü uygulama bildirdi")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Beat Saber (Meta App ID gerekli)" })).toBeDisabled();
 
     fireEvent.click(screen.getByText("Yüklü uygulama kimlikleri (2)"));

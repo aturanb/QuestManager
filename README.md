@@ -32,26 +32,28 @@ mappings documented in `server/src/catalog.ts`.
 
 [threethan/MetaMetadata]: https://github.com/threethan/MetaMetadata
 
-## Values you must supply for hardware testing
+## Hardware configuration
 
 Open [cafequest.config.example.json](cafequest.config.example.json), copy it to
-`cafequest.config.json`, and replace every `FILL_*` game Meta App ID. These IDs
-identify the target games passed to Meta's `launchOtherApp` API.
+`cafequest.config.json`. Current agents launch apps reported by the headset
+directly by Android package, so per-game `FILL_*` Meta App IDs are not required
+for the normal launch path. Replace them only if older agents must use Meta's
+legacy `launchOtherApp` fallback.
 
 A freshly installed headset needs no typing. It finds the café PC on the Wi-Fi
 by itself and follows it when the PC's IP changes ([server
 discovery](docs/architecture.md#server-discovery)); the PC firewall must allow
-inbound TCP 3000 and UDP 3000. The only value baked into the APK is CafeQuest's
-own Meta App ID, the top-level `metaAppId` in `cafequest.config.json`: change
-it, rebuild, and every newly installed headset picks it up.
+inbound TCP 3000 and UDP 3000. The top-level `metaAppId` in
+`cafequest.config.json` is baked into the APK for the legacy Meta launch path;
+change it and rebuild when that fallback is required.
 
 For debugging, the setup screen's **Manual** mode dials a typed host and port
 and never searches. Only the device name is worth setting per headset, and the
 dashboard can rename a headset instead. On the setup screen, a field left blank
 keeps the value already stored, so editing one field never clears the others.
 
-The headset's Meta App ID initializes the Meta SDK and is different from the
-per-game target IDs.
+The headset's Meta App ID initializes the legacy Meta launcher and is different
+from the optional per-game target IDs.
 
 Foreground-game reporting needs one grant per headset, since Android does not
 let the user approve `PACKAGE_USAGE_STATS` from inside the app:
@@ -63,12 +65,12 @@ adb shell appops set com.cafequest.agent GET_USAGE_STATS allow
 The private agent reports its non-system installed packages, including
 CafeQuest itself, when it connects. The dashboard lists every package under
 **Installed on this headset** and exposes both identifier types under
-**Installed app IDs**. Catalog-matched apps launch through Meta's
-`launchOtherApp`; unmatched/sideloaded apps launch directly by Android package
-ID and do not need the GitHub catalog. If a package really has a Meta App ID,
-staff can still add that optional mapping from the dashboard; it is stored in
-SQLite. An offline card offers **Remove headset** to clear stale headsets off
-the board.
+**Installed app IDs**. Current agents launch every reported installed app
+directly by Android package ID, avoiding Meta entitlement checks. Catalog and
+manual Meta App IDs identify official apps and remain a launch fallback for
+older agents. Staff can add an optional mapping from the dashboard; it is
+stored in SQLite. An offline card offers **Remove headset** to clear stale
+headsets off the board.
 
 ## Live support view
 

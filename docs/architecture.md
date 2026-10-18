@@ -72,15 +72,13 @@ and then send video directly over the café LAN.
   `installed-apps.ts`), persists the rest of each device inventory and matches
   it against a local, gitignored catalog cache. Manual package-to-App-ID
   corrections override community matches.
-- **Installed app launch**: a catalog or manual match sends exactly one Meta
-  App ID to `launchOtherApp`. An unmatched package instead sends exactly one
-  Android package ID; the agent resolves its Leanback/launcher activity and
-  starts it as a new task. The GitHub catalog improves official-app metadata
-  but is not required for sideloaded apps. Protocol-v1 agents advertise the
-  additive `launch_android_package` capability; the server returns
-  `agent_update_required` instead of sending a command an older agent cannot
-  decode. Physical Quest package launching is `UNVERIFIED_HARDWARE` until
-  morning-test row 5a passes.
+- **Installed app launch**: a capable agent receives exactly one Android
+  package ID for every app in its reported inventory, then resolves the
+  Leanback/launcher activity and starts it as a new task. The GitHub catalog
+  improves official-app metadata; its Meta App IDs remain a fallback for older
+  agents. Protocol-v1 agents advertise the additive `launch_android_package`
+  capability; an unmatched package on an older agent returns
+  `agent_update_required` instead of sending a command it cannot decode.
 
 ## Live support view (`screen_cast_v1`)
 

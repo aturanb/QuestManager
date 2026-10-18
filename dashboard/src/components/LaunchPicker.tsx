@@ -20,9 +20,10 @@ export type LaunchPickerState = {
 };
 
 /**
- * One picker for both launch paths: catalog matches use Meta's API; anything
- * else falls back to its Android package name on the headset. Shared by the
- * headset card and the live-view panel so the two never offer different lists.
+ * One picker for both launch paths. Installed apps use their Android package
+ * on capable agents; catalog/manual Meta IDs remain a fallback for older
+ * agents. Shared by the headset card and the live-view panel so the two never
+ * offer different lists.
  */
 export function useLaunchPicker(device: Device, games: Game[]): LaunchPickerState {
   const { t } = useI18n();

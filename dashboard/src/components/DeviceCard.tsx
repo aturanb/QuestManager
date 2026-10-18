@@ -147,6 +147,16 @@ export const BADGE_TONE: Record<LaunchStatus["kind"], "ok" | "bad" | "wait"> = {
   timeout: "bad",
 };
 
+function isMetaEntitlementFailure(error: string | null): boolean {
+  if (!error) return false;
+  try {
+    const parsed = JSON.parse(error) as { error?: { code?: unknown } };
+    return parsed.error?.code === 3;
+  } catch {
+    return error.includes("Entitlement check failed");
+  }
+}
+
 export function badgeText(status: LaunchStatus, t: Messages["card"]): string {
   switch (status.kind) {
     case "launching":
@@ -154,14 +164,14 @@ export function badgeText(status: LaunchStatus, t: Messages["card"]): string {
     case "launched":
       return t.launched;
     case "failed":
-      return t.failed(status.error);
+      return t.failed(isMetaEntitlementFailure(status.error) ? t.entitlementFailed : status.error);
     case "timeout":
       return t.timedOut;
   }
 }
 
 /**
- * Left/right Touch controller levels beside the headset battery. Only rendered
+ * Left/right Touch controller levels, in their own row under the headset battery. Only rendered
  * while controller monitoring is on (the server sends null when it is off).
  * An inactive or stale reading keeps its percentage and says "last known", so a
  * controller asleep in the drawer is never presented as fresh data.
@@ -243,18 +253,27 @@ function Battery({ level, charging }: { level: number | null; charging: boolean 
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M10.6 2.6a1.4 1.4 0 0 1 2 0l.8.8a1.4 1.4 0 0 1 0 2L6 12.8l-3.3.6.6-3.3z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function Readout({ state, now, serverOffsetMs }: { state: BayState; now: number; serverOffsetMs: number }) {
   const { t } = useI18n();
   if (state.kind === "playing" || state.kind === "ending") {
     const fraction = state.totalMs > 0 ? Math.min(1, Math.max(0, state.remainingMs / state.totalMs)) : 1;
     const clock = formatRemaining(state.remainingMs);
+    // Clock and caption read as one line ("42:17 left of 60 min"), the meter under both.
     return (
       <div className="readout">
         <p className="clock" role="timer" aria-label={t.card.remaining(clock)}>{clock}</p>
+        {state.totalMs > 0 && <p className="caption">{t.card.leftOf(Math.round(state.totalMs / 60_000))}</p>}
         <div className="meter" aria-hidden="true">
           <span style={{ width: `${fraction * 100}%` }} />
         </div>
-        {state.totalMs > 0 && <p className="caption">{t.card.leftOf(Math.round(state.totalMs / 60_000))}</p>}
       </div>
     );
   }
@@ -353,9 +372,10 @@ export function DeviceCard(props: DeviceCardProps) {
             />
           ) : (
             <>
-              <h2>{device.name}</h2>
-              <button className="btn-text rename-btn" aria-label={c.renameLabel(device.name)} onClick={() => setRenaming(true)}>
-                {c.rename}
+              {/* One line: a long name truncates instead of breaking mid-word; hover shows it whole. */}
+              <h2 title={device.name}>{device.name}</h2>
+              <button className="icon-btn" aria-label={c.renameLabel(device.name)} title={c.rename} onClick={() => setRenaming(true)}>
+                <PencilIcon />
               </button>
             </>
           )}
@@ -365,47 +385,29 @@ export function DeviceCard(props: DeviceCardProps) {
 
       <Readout state={state} now={now} serverOffsetMs={serverOffsetMs} />
 
+      {/* Battery and Model are both short, so they share the first row. */}
       <dl className="facts">
-        <div>
+        <div className="fact-battery">
           <dt>{c.battery}</dt>
-          <dd>
-            <Battery level={device.batteryLevel} charging={device.charging} />
-            {device.controllerBattery && (
+          <dd><Battery level={device.batteryLevel} charging={device.charging} /></dd>
+        </div>
+        <div className="fact-model"><dt>{c.model}</dt><dd>{device.model ?? "—"}</dd></div>
+        {device.controllerBattery && (
+          <div>
+            <dt>{c.controllers}</dt>
+            <dd>
               <ControllerBadges
                 battery={device.controllerBattery}
                 name={device.name}
                 now={now}
                 serverOffsetMs={serverOffsetMs}
               />
-            )}
-          </dd>
-        </div>
+            </dd>
+          </div>
+        )}
         <div><dt>{c.openNow}</dt><dd>{openNow}</dd></div>
         <div><dt>{c.lastLaunched}</dt><dd>{device.expectedGame?.name ?? "—"}</dd></div>
-        <div><dt>{c.model}</dt><dd>{device.model ?? "—"}</dd></div>
       </dl>
-
-      {/* Live view: online + capable asks; an older agent is told to update. */}
-      <div className="controls live-view" role="group" aria-label={t.cast.group(device.name)}>
-        {!device.online ? (
-          <button className="btn" aria-label={t.cast.offlineLabel(device.name)} title={c.headsetOffline} disabled>
-            {t.cast.request}
-          </button>
-        ) : device.supportsScreenCast ? (
-          <button
-            className="btn"
-            aria-label={t.cast.requestLabel(device.name)}
-            disabled={props.busy || props.castBusy === true}
-            onClick={() => props.onRequestCast?.(device.id)}
-          >
-            {t.cast.request}
-          </button>
-        ) : (
-          <button className="btn" aria-label={t.cast.updateAgentLabel(device.name)} title={t.cast.updateAgent} disabled>
-            {t.cast.updateAgent}
-          </button>
-        )}
-      </div>
 
       {targetsSelection && <p className="action-scope">{t.bulk.scope(actionTargetCount)}</p>}
 
@@ -499,53 +501,71 @@ export function DeviceCard(props: DeviceCardProps) {
       {props.actionResult && <p className="note action-result" data-tone="wait" role="status">{props.actionResult}</p>}
       {props.error && <p className="note" data-tone="bad" role="alert">{props.error}</p>}
 
-      {device.installedApps.length > 0 && (
-        <p className="inventory">{c.inventory(device.installedApps.length)}</p>
-      )}
-      {device.installedApps.length > 0 && (
-        <details className="app-id-list">
-          <summary>{c.appIds(device.installedApps.length)}</summary>
-          <p className="hint">{c.appIdsHint(t.catalog.update)}</p>
-          {device.installedApps.map((app) => (
-            <InstalledAppDetails
-              key={app.packageName}
-              app={app}
-              deviceId={device.id}
-              busy={props.busy}
-              onMap={props.onMapInstalled}
-            />
-          ))}
-        </details>
-      )}
+      {/* Occasional tools share the bottom line; an open panel takes the full width below it. */}
+      <footer className="bay-tools">
+        {device.installedApps.length > 0 && (
+          <details className="app-id-list">
+            <summary>{c.appIds(device.installedApps.length)}</summary>
+            <p className="hint">{c.appIdsHint(t.catalog.update)}</p>
+            {device.installedApps.map((app) => (
+              <InstalledAppDetails
+                key={app.packageName}
+                app={app}
+                deviceId={device.id}
+                busy={props.busy}
+                onMap={props.onMapInstalled}
+              />
+            ))}
+          </details>
+        )}
 
-      {!device.online && (
-        <footer className="bay-foot">
-          {confirmingRemove ? (
-            <div
-              className="confirm"
-              role="group"
-              aria-label={c.removeGroup(device.name)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setConfirmingRemove(false);
-              }}
-            >
-              <p>{c.removeQuestion(device.name, device.session?.status === "active")}</p>
-              <div className="controls">
-                <button className="btn btn-remove" aria-label={c.confirmRemoveLabel(device.name)} disabled={props.busy} onClick={() => props.onRemove(device.id)}>
-                  {c.remove}
-                </button>
-                <button className="btn" aria-label={c.keepLabel(device.name)} autoFocus onClick={() => setConfirmingRemove(false)}>
-                  {c.keep}
-                </button>
-              </div>
+        {!device.online && (confirmingRemove ? (
+          <div
+            className="confirm"
+            role="group"
+            aria-label={c.removeGroup(device.name)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setConfirmingRemove(false);
+            }}
+          >
+            <p>{c.removeQuestion(device.name, device.session?.status === "active")}</p>
+            <div className="controls">
+              <button className="btn btn-remove" aria-label={c.confirmRemoveLabel(device.name)} disabled={props.busy} onClick={() => props.onRemove(device.id)}>
+                {c.remove}
+              </button>
+              <button className="btn" aria-label={c.keepLabel(device.name)} autoFocus onClick={() => setConfirmingRemove(false)}>
+                {c.keep}
+              </button>
             </div>
+          </div>
+        ) : (
+          <button className="btn-text remove-btn" aria-label={c.removeLabel(device.name)} onClick={() => setConfirmingRemove(true)}>
+            {c.removeHeadset}
+          </button>
+        ))}
+
+        {/* Live view: online + capable asks; an older agent is told to update. */}
+        <div className="controls live-view" role="group" aria-label={t.cast.group(device.name)}>
+          {!device.online ? (
+            <button className="btn" aria-label={t.cast.offlineLabel(device.name)} title={c.headsetOffline} disabled>
+              {t.cast.request}
+            </button>
+          ) : device.supportsScreenCast ? (
+            <button
+              className="btn"
+              aria-label={t.cast.requestLabel(device.name)}
+              disabled={props.busy || props.castBusy === true}
+              onClick={() => props.onRequestCast?.(device.id)}
+            >
+              {t.cast.request}
+            </button>
           ) : (
-            <button className="btn-text" aria-label={c.removeLabel(device.name)} onClick={() => setConfirmingRemove(true)}>
-              {c.removeHeadset}
+            <button className="btn" aria-label={t.cast.updateAgentLabel(device.name)} title={t.cast.updateAgent} disabled>
+              {t.cast.updateAgent}
             </button>
           )}
-        </footer>
-      )}
+        </div>
+      </footer>
     </article>
   );
 }
