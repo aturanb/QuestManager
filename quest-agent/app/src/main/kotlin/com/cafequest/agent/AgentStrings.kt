@@ -1,0 +1,246 @@
+package com.cafequest.agent
+
+/** Languages the headset app speaks; [code] is what [LanguageStore] keeps. */
+enum class AgentLanguage(val code: String) { EN("en"), TR("tr") }
+
+/** A pick made on this headset wins; until then its system language decides. Junk in storage is no pick. */
+fun resolveLanguage(stored: String?, systemLanguage: String): AgentLanguage =
+    AgentLanguage.entries.firstOrNull { it.code == stored }
+        ?: if (systemLanguage.lowercase().startsWith("tr")) AgentLanguage.TR else AgentLanguage.EN
+
+val AgentLanguage.strings: AgentStrings
+    get() = when (this) {
+        AgentLanguage.EN -> EnglishStrings
+        AgentLanguage.TR -> TurkishStrings
+    }
+
+/**
+ * Every word the headset app shows. Both languages implement all of it, so a
+ * string added here without its Turkish twin does not compile. [server] is
+ * null when no host is set up yet.
+ */
+interface AgentStrings {
+    val language: String
+    fun agentVersion(version: String): String
+
+    val connected: String
+    val connectedCaption: String
+    val connecting: String
+    fun reaching(server: String?): String
+    val notConnected: String
+    fun cantReach(server: String?): String
+
+    val searching: String
+    val searchingCaption: String
+
+    val server: String
+    val battery: String
+    val charging: String
+    val service: String
+    val running: String
+    val stopped: String
+    val lastLaunched: String
+    val lastCommand: String
+    val lastResult: String
+    val success: String
+    fun failed(code: String): String
+
+    val reconnect: String
+    val sendTestTelemetry: String
+    val testAppLaunch: String
+    val changeSetup: String
+
+    val setupTitle: String
+    val setupHint: String
+    val deviceName: String
+    val serverHost: String
+    val serverPort: String
+    val metaAppId: String
+    val saveAndConnect: String
+    val cancel: String
+
+    val auto: String
+    val manual: String
+    val notFoundYet: String
+    val findServer: String
+    val findingServer: String
+    val pickServer: String
+    val noServerFound: String
+
+    val notificationChannel: String
+    val notificationTitle: String
+    val notificationText: String
+
+    // Live support view (screen_cast_v1).
+    val casting: String
+    val castRequestPending: String
+    val castShare: String
+    fun castShareLabel(name: String): String
+    val castNegotiating: String
+    val castSharing: String
+    val castStop: String
+    val castStopped: String
+    val castFailedTitle: String
+    /** Stable failure codes are translated here; raw platform errors never reach the screen. */
+    fun castFailure(code: String?): String
+    /** Shown after a failure: only staff can start the next request. */
+    val castFailedHint: String
+    val notificationAwaiting: String
+    val notificationSharing: String
+}
+
+object EnglishStrings : AgentStrings {
+    override val language = "Language"
+    override fun agentVersion(version: String) = "Agent $version"
+
+    override val connected = "Connected"
+    override val connectedCaption = "The café board can see this headset."
+    override val connecting = "Connecting…"
+    override fun reaching(server: String?) = "Reaching ${server ?: "the café PC"}"
+    override val notConnected = "Not connected"
+    override fun cantReach(server: String?) = "Can't reach ${server ?: "the café PC"}. Check the café Wi-Fi, then tap $reconnect."
+
+    override val searching = "Searching for server…"
+    override val searchingCaption = "Looking for the café PC on this Wi-Fi."
+
+    override val server = "Server"
+    override val battery = "Battery"
+    override val charging = "charging"
+    override val service = "Service"
+    override val running = "Running"
+    override val stopped = "Stopped"
+    override val lastLaunched = "Last launched"
+    override val lastCommand = "Last command"
+    override val lastResult = "Last result"
+    override val success = "SUCCESS"
+    override fun failed(code: String) = "FAILED $code"
+
+    override val reconnect = "Reconnect"
+    override val sendTestTelemetry = "Send test telemetry"
+    override val testAppLaunch = "Test app launch"
+    override val changeSetup = "Change setup"
+
+    override val setupTitle = "Headset setup"
+    override val setupHint = "A field left blank keeps its saved value."
+    override val deviceName = "Device name"
+    override val serverHost = "Server host"
+    override val serverPort = "Server port"
+    override val metaAppId = "Meta App ID"
+    override val saveAndConnect = "Save and connect"
+    override val cancel = "Cancel"
+
+    override val auto = "Auto"
+    override val manual = "Manual"
+    override val notFoundYet = "Not found yet"
+    override val findServer = "Find server"
+    override val findingServer = "Searching…"
+    override val pickServer = "Several servers answered. Pick the café PC:"
+    override val noServerFound = "No server found. Is this headset on the café PC's Wi-Fi? Is UDP port 3000 open in the PC's firewall?"
+
+    override val notificationChannel = "CafeQuest agent"
+    override val notificationTitle = "CafeQuest agent running"
+    override val notificationText = "Connected to café server"
+
+    override val casting = "Live support view"
+    override val castRequestPending =
+        "Café staff asked to see this screen. Approve Quest's screen-sharing dialog to start."
+    override val castShare = "Share screen with café staff"
+    override fun castShareLabel(name: String) = "Share the screen of $name with café staff"
+    override val castNegotiating = "Starting the live view…"
+    override val castSharing = "This screen is being shared with café staff."
+    override val castStop = "Stop sharing"
+    override val castStopped = "Sharing stopped"
+    override val castFailedTitle = "Sharing failed"
+    override fun castFailure(code: String?) = when (code) {
+        CastFailure.CONSENT_DENIED -> "Screen sharing was declined."
+        CastFailure.APPROVAL_TIMEOUT -> "The request timed out before it was approved."
+        CastFailure.NEGOTIATION_TIMEOUT -> "Video did not start in time."
+        CastFailure.PROJECTION_STOPPED -> "Screen sharing was stopped."
+        CastFailure.PEER_DISCONNECTED -> "The connection to café staff was lost."
+        CastFailure.CAPTURE_FAILED -> "Screen capture could not start."
+        else -> "Something went wrong."
+    }
+    override val castFailedHint = "Café staff can start a new request; Quest asks for consent again every time."
+    override val notificationAwaiting = "Live-view request waiting — open CafeQuest to approve"
+    override val notificationSharing = "Screen sharing with café staff is on"
+}
+
+// Names and addresses never take a suffix ("Quest 02'yi"): they go before a suffixed noun instead.
+object TurkishStrings : AgentStrings {
+    override val language = "Dil"
+    override fun agentVersion(version: String) = "Sürüm $version"
+
+    override val connected = "Bağlı"
+    override val connectedCaption = "Kafe panosu bu gözlüğü görüyor."
+    override val connecting = "Bağlanıyor…"
+    override fun reaching(server: String?) = if (server == null) "Kafe bilgisayarına ulaşılıyor" else "$server adresine ulaşılıyor"
+    override val notConnected = "Bağlı değil"
+    override fun cantReach(server: String?) =
+        (if (server == null) "Kafe bilgisayarına ulaşılamıyor." else "$server adresine ulaşılamıyor.") +
+            " Kafe Wi-Fi ağını kontrol edin, sonra “$reconnect” düğmesine dokunun."
+
+    override val searching = "Sunucu aranıyor…"
+    override val searchingCaption = "Kafe bilgisayarı bu Wi-Fi ağında aranıyor."
+
+    override val server = "Sunucu"
+    override val battery = "Pil"
+    override val charging = "şarj oluyor"
+    override val service = "Servis"
+    override val running = "Çalışıyor"
+    override val stopped = "Durdu"
+    override val lastLaunched = "Son açılan"
+    override val lastCommand = "Son komut"
+    override val lastResult = "Son sonuç"
+    override val success = "BAŞARILI"
+    override fun failed(code: String) = "BAŞARISIZ $code"
+
+    override val reconnect = "Yeniden bağlan"
+    override val sendTestTelemetry = "Test telemetrisi gönder"
+    override val testAppLaunch = "Uygulama açmayı dene"
+    override val changeSetup = "Kurulumu değiştir"
+
+    override val setupTitle = "Gözlük kurulumu"
+    override val setupHint = "Boş bırakılan alan kayıtlı değerini korur."
+    override val deviceName = "Cihaz adı"
+    override val serverHost = "Sunucu adresi"
+    override val serverPort = "Sunucu portu"
+    override val metaAppId = "Meta App ID"
+    override val saveAndConnect = "Kaydet ve bağlan"
+    override val cancel = "İptal"
+
+    override val auto = "Otomatik"
+    override val manual = "Manuel"
+    override val notFoundYet = "Henüz bulunamadı"
+    override val findServer = "Sunucuyu bul"
+    override val findingServer = "Aranıyor…"
+    override val pickServer = "Birden fazla sunucu yanıt verdi. Kafe bilgisayarını seçin:"
+    override val noServerFound = "Sunucu bulunamadı. Gözlük, kafe bilgisayarıyla aynı Wi-Fi ağında mı? Bilgisayarın güvenlik duvarında UDP 3000 portu açık mı?"
+
+    override val notificationChannel = "CafeQuest servisi"
+    override val notificationTitle = "CafeQuest çalışıyor"
+    override val notificationText = "Kafe sunucusuna bağlı"
+
+    override val casting = "Canlı destek görüntüsü"
+    override val castRequestPending =
+        "Kafe personeli bu ekranı görmek istedi. Başlatmak için Quest ekran paylaşımı penceresini onaylayın."
+    override val castShare = "Ekranı kafe personeliyle paylaş"
+    override fun castShareLabel(name: String) = "$name ekranını kafe personeliyle paylaş"
+    override val castNegotiating = "Canlı görüntü başlatılıyor…"
+    override val castSharing = "Bu ekran kafe personeliyle paylaşılıyor."
+    override val castStop = "Paylaşımı durdur"
+    override val castStopped = "Paylaşım durdu"
+    override val castFailedTitle = "Paylaşım başarısız"
+    override fun castFailure(code: String?) = when (code) {
+        CastFailure.CONSENT_DENIED -> "Ekran paylaşımı reddedildi."
+        CastFailure.APPROVAL_TIMEOUT -> "İstek onaylanmadan zaman aşımına uğradı."
+        CastFailure.NEGOTIATION_TIMEOUT -> "Görüntü zamanında başlamadı."
+        CastFailure.PROJECTION_STOPPED -> "Ekran paylaşımı durduruldu."
+        CastFailure.PEER_DISCONNECTED -> "Kafe personeliyle bağlantı kesildi."
+        CastFailure.CAPTURE_FAILED -> "Ekran yakalama başlatılamadı."
+        else -> "Bir şeyler ters gitti."
+    }
+    override val castFailedHint =
+        "Kafe personeli yeni bir istek başlatabilir; Quest her seferinde onay ister."
+    override val notificationAwaiting = "Canlı görüntü isteği bekliyor — onaylamak için CafeQuest'i açın"
+    override val notificationSharing = "Kafe personeliyle ekran paylaşımı açık"
+}

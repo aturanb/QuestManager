@@ -3,10 +3,30 @@ import { test } from "node:test";
 import {
   HelloSchema,
   TelemetrySchema,
+  CommandAckSchema,
   CommandResultSchema,
   ServerCommandSchema,
+  ServerErrorSchema,
+  InstalledAppsSchema,
+  AgentCastStatusSchema,
+  AgentCastSignalSchema,
+  CastRequestSchema,
+  ServerCastSignalSchema,
+  CastStopSchema,
+  ViewerCastSignalSchema,
+  ViewerCastOfferSchema,
+  RtcSignalSchema,
+  MAX_CAST_SDP_CHARS,
+  MAX_CAST_ICE_CANDIDATE_CHARS,
+  SCREEN_CAST_CAPABILITY,
+  ControllerMonitoringSchema,
+  CONTROLLER_MONITORING_CAPABILITY,
+  DeviceNameSchema,
+  DEVICE_NAME_CAPABILITY,
 } from "../src/protocol.js";
 import { parseAgentMessage } from "../src/parse.js";
+
+const castSessionId = "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d";
 
 const hello = {
   type: "hello",
@@ -35,6 +55,30 @@ test("hello schema accepts a valid hello", () => {
   assert.equal(HelloSchema.safeParse(hello).success, true);
 });
 
+test("hello preserves a previous install id for one-time device migration", () => {
+  const previousDeviceId = "7a6c1c78-30cc-4ba8-8e72-cfcf3a729c18";
+  const parsed = HelloSchema.safeParse({ ...hello, previousDeviceId });
+
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal((parsed.data as Record<string, unknown>).previousDeviceId, previousDeviceId);
+  }
+});
+
+test("hello advertises package-launch support without breaking older agents", () => {
+  const capable = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package"],
+  });
+
+  assert.equal(capable.success, true);
+  if (capable.success) assert.deepEqual(capable.data.capabilities, ["launch_android_package"]);
+  const future = HelloSchema.safeParse({ ...hello, capabilities: ["future_capability"] });
+  assert.equal(future.success, true);
+  if (future.success) assert.deepEqual(future.data.capabilities, ["future_capability"]);
+  assert.equal(HelloSchema.safeParse(hello).success, true);
+});
+
 test("telemetry schema rejects battery -50 and 900 (§33)", () => {
   assert.equal(TelemetrySchema.safeParse({ ...telemetry, battery: { level: -50, charging: false } }).success, false);
   assert.equal(TelemetrySchema.safeParse({ ...telemetry, battery: { level: 900, charging: false } }).success, false);
@@ -48,15 +92,88 @@ test("telemetry schema rejects wrong protocolVersion and missing deviceId", () =
   assert.equal(TelemetrySchema.safeParse(noId).success, false);
 });
 
+test("telemetry accepts omitted nullable expected game and foreground usage state", () => {
+  const withoutExpectedGame = {
+    type: "telemetry",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    timestamp: new Date().toISOString(),
+    battery: { level: 73, charging: true },
+    agent: { foreground: true },
+    usage: {
+      accessGranted: true,
+      foregroundApp: {
+        packageName: "com.TriangleFactory.Breachers",
+        startedAt: "2026-10-08T15:30:00.000Z",
+      },
+    },
+  };
+
+  const parsed = TelemetrySchema.safeParse(withoutExpectedGame);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.expectedCurrentGame, null);
+    assert.equal(parsed.data.usage?.foregroundApp?.packageName, "com.TriangleFactory.Breachers");
+  }
+});
+
+test("telemetry rejects malformed foreground package and timestamp", () => {
+  const base = {
+    ...telemetry,
+    usage: { accessGranted: true, foregroundApp: null },
+  };
+  assert.equal(
+    TelemetrySchema.safeParse({
+      ...base,
+      usage: { accessGranted: true, foregroundApp: { packageName: "bad package", startedAt: new Date().toISOString() } },
+    }).success,
+    false,
+  );
+  assert.equal(
+    TelemetrySchema.safeParse({
+      ...base,
+      usage: { accessGranted: true, foregroundApp: { packageName: "com.example.game", startedAt: "yesterday" } },
+    }).success,
+    false,
+  );
+});
+
+test("command_ack and command_result require owning deviceId", () => {
+  const ack = { type: "command_ack", protocolVersion: 1, commandId: hello.deviceId, status: "received", deviceId: hello.deviceId };
+  assert.equal(CommandAckSchema.safeParse(ack).success, true);
+  const { deviceId: _d1, ...ackNoId } = ack;
+  assert.equal(CommandAckSchema.safeParse(ackNoId).success, false);
+  const res = { type: "command_result", protocolVersion: 1, commandId: hello.deviceId, status: "success" as const, deviceId: hello.deviceId };
+  assert.equal(CommandResultSchema.safeParse(res).success, true);
+  const { deviceId: _d2, ...resNoId } = res;
+  assert.equal(CommandResultSchema.safeParse(resNoId).success, false);
+});
+
+test("a hello from a 0.2.0 agent still carrying enrollmentKey parses without it", () => {
+  const parsed = HelloSchema.safeParse({ ...hello, enrollmentKey: "cafe-secret" });
+  assert.equal(parsed.success, true);
+  if (parsed.success) assert.equal("enrollmentKey" in parsed.data, false);
+});
+
+test("server error schema carries ownership codes, and no enrollment code", () => {
+  assert.equal(
+    ServerErrorSchema.safeParse({ type: "error", protocolVersion: 1, code: "ENROLLMENT_REJECTED", message: "x" }).success,
+    false,
+  );
+  for (const code of ["DEVICE_MISMATCH", "UNKNOWN_COMMAND", "FOREIGN_COMMAND", "DUPLICATE_DEVICE"]) {
+    assert.equal(
+      ServerErrorSchema.safeParse({ type: "error", protocolVersion: 1, code, message: "x" }).success,
+      true,
+      code
+    );
+  }
+});
+
 test("command_result requires success|failed status", () => {
-  assert.equal(
-    CommandResultSchema.safeParse({ type: "command_result", protocolVersion: 1, commandId: hello.deviceId, status: "success" }).success,
-    true
-  );
-  assert.equal(
-    CommandResultSchema.safeParse({ type: "command_result", protocolVersion: 1, commandId: hello.deviceId, status: "pending" }).success,
-    false
-  );
+  const base = { type: "command_result", protocolVersion: 1, commandId: hello.deviceId, deviceId: hello.deviceId };
+  assert.equal(CommandResultSchema.safeParse({ ...base, status: "success" }).success, true);
+  assert.equal(CommandResultSchema.safeParse({ ...base, status: "failed", error: "TARGET_NOT_INSTALLED" }).success, true);
+  assert.equal(CommandResultSchema.safeParse({ ...base, status: "pending" }).success, false);
 });
 
 test("server command schema matches brief §20 shape", () => {
@@ -68,6 +185,33 @@ test("server command schema matches brief §20 shape", () => {
     payload: { gameId: "beat-saber", gameName: "Beat Saber", metaAppId: "1234" },
   };
   assert.equal(ServerCommandSchema.safeParse(cmd).success, true);
+});
+
+test("launch command accepts exactly one Meta or Android package target", () => {
+  const base = {
+    type: "command",
+    protocolVersion: 1,
+    commandId: hello.deviceId,
+    command: "launch_app",
+    payload: { gameId: "local-game", gameName: "Local Game" },
+  } as const;
+
+  assert.equal(
+    ServerCommandSchema.safeParse({ ...base, payload: { ...base.payload, metaAppId: "12345" } }).success,
+    true,
+  );
+  assert.equal(
+    ServerCommandSchema.safeParse({ ...base, payload: { ...base.payload, packageName: "com.example.localgame" } }).success,
+    true,
+  );
+  assert.equal(ServerCommandSchema.safeParse(base).success, false);
+  assert.equal(
+    ServerCommandSchema.safeParse({
+      ...base,
+      payload: { ...base.payload, metaAppId: "12345", packageName: "com.example.localgame" },
+    }).success,
+    false,
+  );
 });
 
 test("parseAgentMessage: invalid JSON is rejected safely", () => {
@@ -97,7 +241,261 @@ test("parseAgentMessage: valid hello parses", () => {
   if (r.ok) assert.equal(r.value.type, "hello");
 });
 
+test("installed_apps accepts a bounded device inventory and parses as an agent message", () => {
+  const inventory = {
+    type: "installed_apps",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    scannedAt: new Date().toISOString(),
+    apps: [
+      {
+        packageName: "com.TriangleFactory.Breachers",
+        label: "Breachers",
+        versionName: "1.2.3",
+        versionCode: 42,
+      },
+    ],
+  };
+
+  assert.equal(InstalledAppsSchema.safeParse(inventory).success, true);
+  const parsed = parseAgentMessage(JSON.stringify(inventory));
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.value.type, "installed_apps");
+});
+
+test("installed_apps rejects unsafe package data and oversized inventories", () => {
+  const base = {
+    type: "installed_apps",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    scannedAt: new Date().toISOString(),
+  };
+  assert.equal(
+    InstalledAppsSchema.safeParse({
+      ...base,
+      apps: [{ packageName: "bad package/name", label: "Bad", versionName: null, versionCode: null }],
+    }).success,
+    false
+  );
+  assert.equal(
+    InstalledAppsSchema.safeParse({
+      ...base,
+      apps: Array.from({ length: 513 }, (_, i) => ({
+        packageName: `com.example.app${i}`,
+        label: `App ${i}`,
+        versionName: null,
+        versionCode: null,
+      })),
+    }).success,
+    false
+  );
+  const duplicate = { packageName: "com.example.same", label: "Same", versionName: null, versionCode: null };
+  assert.equal(
+    InstalledAppsSchema.safeParse({ ...base, apps: [duplicate, { ...duplicate, label: "Duplicate" }] }).success,
+    false
+  );
+});
+
 test("parseAgentMessage: non-object JSON rejected", () => {
   assert.equal(parseAgentMessage("42").ok, false);
   assert.equal(parseAgentMessage("null").ok, false);
+});
+
+// --- Screen cast protocol (screen_cast_v1) ---------------------------------
+
+test("hello accepts screen_cast_v1 beside package launch and still parses without capabilities", () => {
+  const both = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package", SCREEN_CAST_CAPABILITY],
+  });
+  assert.equal(both.success, true);
+  if (both.success) assert.deepEqual(both.data.capabilities, ["launch_android_package", "screen_cast_v1"]);
+  assert.equal(HelloSchema.safeParse(hello).success, true);
+});
+
+test("rtc signals bound SDP and ICE candidates exactly at their caps", () => {
+  assert.equal(RtcSignalSchema.safeParse({ kind: "offer", sdp: "x".repeat(MAX_CAST_SDP_CHARS) }).success, true);
+  assert.equal(RtcSignalSchema.safeParse({ kind: "answer", sdp: "x".repeat(MAX_CAST_SDP_CHARS) }).success, true);
+  assert.equal(RtcSignalSchema.safeParse({ kind: "offer", sdp: "x".repeat(MAX_CAST_SDP_CHARS + 1) }).success, false);
+  const ice = { kind: "ice", candidate: "c".repeat(MAX_CAST_ICE_CANDIDATE_CHARS), sdpMid: "0", sdpMLineIndex: 0 };
+  assert.equal(RtcSignalSchema.safeParse(ice).success, true);
+  assert.equal(
+    RtcSignalSchema.safeParse({ kind: "ice", candidate: "c".repeat(MAX_CAST_ICE_CANDIDATE_CHARS + 1) }).success,
+    false,
+  );
+  assert.equal(RtcSignalSchema.safeParse({ kind: "ice", candidate: "" }).success, false);
+});
+
+test("agent cast frames require deviceId and a UUID sessionId through parseAgentMessage", () => {
+  const status = {
+    type: "cast_status",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    sessionId: castSessionId,
+    status: "awaiting_approval",
+  };
+  const parsedStatus = parseAgentMessage(JSON.stringify(status));
+  assert.equal(parsedStatus.ok, true);
+  if (parsedStatus.ok) assert.equal(parsedStatus.value.type, "cast_status");
+  const { deviceId: _d, ...statusNoId } = status;
+  assert.equal(AgentCastStatusSchema.safeParse(statusNoId).success, false);
+  assert.equal(AgentCastStatusSchema.safeParse({ ...status, sessionId: "not-a-uuid" }).success, false);
+  assert.equal(AgentCastStatusSchema.safeParse({ ...status, status: "reserved" }).success, false);
+  assert.equal(
+    AgentCastStatusSchema.safeParse({ ...status, status: "failed", error: "consent_denied" }).success,
+    true,
+  );
+  assert.equal(AgentCastStatusSchema.safeParse({ ...status, status: "failed", error: "boom: stacktrace" }).success, false);
+
+  const signal = {
+    type: "cast_signal",
+    protocolVersion: 1,
+    deviceId: hello.deviceId,
+    sessionId: castSessionId,
+    signal: { kind: "offer", sdp: "v=0" },
+  };
+  const parsedSignal = parseAgentMessage(JSON.stringify(signal));
+  assert.equal(parsedSignal.ok, true);
+  if (parsedSignal.ok) assert.equal(parsedSignal.value.type, "cast_signal");
+  assert.equal(AgentCastSignalSchema.safeParse({ ...signal, signal: { kind: "answer", sdp: "v=0" } }).success, false);
+  const { deviceId: _d2, ...signalNoId } = signal;
+  assert.equal(AgentCastSignalSchema.safeParse(signalNoId).success, false);
+});
+
+test("server-to-agent cast frames accept only their exact direction and shape", () => {
+  assert.equal(
+    CastRequestSchema.safeParse({
+      type: "cast_request",
+      protocolVersion: 1,
+      sessionId: castSessionId,
+      expiresAt: new Date().toISOString(),
+    }).success,
+    true,
+  );
+  assert.equal(
+    CastRequestSchema.safeParse({ type: "cast_stop", protocolVersion: 1, sessionId: castSessionId, reason: "failed" })
+      .success,
+    false,
+  );
+  assert.equal(
+    ServerCastSignalSchema.safeParse({ type: "cast_signal", protocolVersion: 1, sessionId: castSessionId, signal: { kind: "answer", sdp: "v=0" } })
+      .success,
+    true,
+  );
+  assert.equal(
+    ServerCastSignalSchema.safeParse({ type: "cast_signal", protocolVersion: 1, sessionId: castSessionId, signal: { kind: "offer", sdp: "v=0" } })
+      .success,
+    false,
+  );
+  assert.equal(
+    CastStopSchema.safeParse({ type: "cast_stop", protocolVersion: 1, sessionId: castSessionId, reason: "viewer_stopped" })
+      .success,
+    true,
+  );
+  assert.equal(
+    CastStopSchema.safeParse({ type: "cast_stop", protocolVersion: 1, sessionId: castSessionId, reason: "whatever" })
+      .success,
+    false,
+  );
+});
+
+test("viewer cast signal accepts answer and ICE but rejects an offer", () => {
+  const base = { type: "cast_signal", protocolVersion: 1, sessionId: castSessionId };
+  assert.equal(ViewerCastSignalSchema.safeParse({ ...base, signal: { kind: "answer", sdp: "v=0" } }).success, true);
+  assert.equal(ViewerCastSignalSchema.safeParse({ ...base, signal: { kind: "ice", candidate: "candidate:1 1 udp 1 10.0.0.1 1 typ host" } }).success, true);
+  assert.equal(ViewerCastSignalSchema.safeParse({ ...base, signal: { kind: "offer", sdp: "v=0" } }).success, false);
+  assert.equal(ViewerCastOfferSchema.safeParse({ ...base, signal: { kind: "offer", sdp: "v=0" } }).success, true);
+  assert.equal(ViewerCastOfferSchema.safeParse({ ...base, signal: { kind: "answer", sdp: "v=0" } }).success, false);
+});
+
+test("legacy launch and telemetry messages still parse unchanged", () => {
+  const launch = {
+    type: "command",
+    protocolVersion: 1,
+    commandId: castSessionId,
+    command: "launch_app",
+    payload: { gameId: "beat-saber", gameName: "Beat Saber", metaAppId: "1234" },
+  };
+  assert.equal(ServerCommandSchema.safeParse(launch).success, true);
+  assert.equal(parseAgentMessage(JSON.stringify(telemetry)).ok, true);
+});
+
+test("controller_monitoring accepts exactly a boolean in the v1 envelope", () => {
+  const frame = { type: "controller_monitoring", protocolVersion: 1, enabled: true };
+  assert.equal(ControllerMonitoringSchema.safeParse(frame).success, true);
+  assert.equal(ControllerMonitoringSchema.safeParse({ ...frame, enabled: false }).success, true);
+  for (const bad of [
+    { ...frame, enabled: "true" },
+    { ...frame, enabled: 1 },
+    { ...frame, enabled: null },
+    { type: frame.type, protocolVersion: 1 },
+    { ...frame, protocolVersion: 2 },
+    { ...frame, type: "controller_monitor" },
+  ]) {
+    assert.equal(ControllerMonitoringSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("hello accepts controller_monitoring_v1 beside the other capabilities", () => {
+  assert.equal(CONTROLLER_MONITORING_CAPABILITY, "controller_monitoring_v1");
+  const parsed = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package", "screen_cast_v1", CONTROLLER_MONITORING_CAPABILITY],
+  });
+  assert.equal(parsed.success, true);
+});
+
+test("telemetry carries wirelessDebugging, and an unknown value never rejects the frame", () => {
+  for (const state of ["on", "off", "not_permitted"] as const) {
+    const parsed = parseAgentMessage(JSON.stringify({ ...telemetry, wirelessDebugging: state }));
+    assert.equal(parsed.ok, true);
+    if (parsed.ok && parsed.value.type === "telemetry") assert.equal(parsed.value.wirelessDebugging, state);
+  }
+  // Absent stays absent: older agents never send it.
+  const absent = parseAgentMessage(JSON.stringify(telemetry));
+  assert.equal(absent.ok, true);
+  if (absent.ok && absent.value.type === "telemetry") assert.equal(absent.value.wirelessDebugging, undefined);
+  // A future value must not cost the headset its liveness refresh.
+  for (const future of ["paired", "", 7, null, { state: "on" }]) {
+    const parsed = parseAgentMessage(JSON.stringify({ ...telemetry, wirelessDebugging: future }));
+    assert.equal(parsed.ok, true, JSON.stringify(future));
+    if (parsed.ok && parsed.value.type === "telemetry") assert.equal(parsed.value.wirelessDebugging, undefined);
+  }
+});
+
+test("hello carries an optional deviceNameSetByStaff flag that must be a boolean", () => {
+  assert.equal(HelloSchema.safeParse({ ...hello, deviceNameSetByStaff: true }).success, true);
+  assert.equal(HelloSchema.safeParse({ ...hello, deviceNameSetByStaff: false }).success, true);
+  // Absent stays absent: agents older than 0.7.0 never send it.
+  const absent = HelloSchema.safeParse(hello);
+  assert.equal(absent.success, true);
+  if (absent.success) assert.equal(absent.data.deviceNameSetByStaff, undefined);
+  for (const bad of ["true", 1, null]) {
+    assert.equal(HelloSchema.safeParse({ ...hello, deviceNameSetByStaff: bad }).success, false, JSON.stringify(bad));
+  }
+});
+
+test("device_name is a bounded server-to-agent frame in the v1 envelope", () => {
+  assert.equal(DEVICE_NAME_CAPABILITY, "device_name_v1");
+  const frame = { type: "device_name", protocolVersion: 1, name: "Quest 01" };
+  assert.equal(DeviceNameSchema.safeParse(frame).success, true);
+  assert.equal(DeviceNameSchema.safeParse({ ...frame, name: "x".repeat(64) }).success, true);
+  for (const bad of [
+    { ...frame, name: "" },
+    { ...frame, name: "x".repeat(65) },
+    { ...frame, name: 7 },
+    { type: frame.type, protocolVersion: 1 },
+    { ...frame, protocolVersion: 2 },
+    { ...frame, type: "device_rename" },
+  ]) {
+    assert.equal(DeviceNameSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("hello accepts device_name_v1 beside the other capabilities", () => {
+  const parsed = HelloSchema.safeParse({
+    ...hello,
+    capabilities: ["launch_android_package", "screen_cast_v1", "controller_monitoring_v1", DEVICE_NAME_CAPABILITY],
+  });
+  assert.equal(parsed.success, true);
 });

@@ -6,7 +6,7 @@
   "types": "dist/src/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test dist/tests/*.test.js"
+    "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js"
   },
   "dependencies": {
     "zod": "^3.23.8"

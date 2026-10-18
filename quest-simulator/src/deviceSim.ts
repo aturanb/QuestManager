@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
 import { makeHello, makeTelemetry } from "./protocolClient.js";
 import { stepBattery, type BatteryState } from "./battery.js";
-import type { ExpectedGame } from "@cafequest/shared";
+import type { ExpectedGame, InstalledApp, Telemetry } from "@cafequest/shared";
 
 export type DeviceSimOptions = {
   deviceId?: string;
@@ -24,6 +24,40 @@ export type DeviceStats = {
 };
 
 /**
+ * Packages the simulated headsets report as installed. Catalog matches use
+ * Meta App IDs; any unmatched package can still launch by Android package ID.
+ */
+export const SIM_INSTALLED_APPS: InstalledApp[] = [
+  { packageName: "com.beatgames.beatsaber", label: "Beat Saber", versionName: "1.37.0", versionCode: 1370 },
+  { packageName: "com.MightyCoconut.WalkaboutMiniGolf", label: "Walkabout Mini Golf", versionName: "3.4.1", versionCode: 341 },
+  { packageName: "quest.eleven.forfunlabs", label: "Eleven Table Tennis", versionName: "2.1.0", versionCode: 210 },
+  { packageName: "com.TriangleFactory.Breachers", label: "Breachers", versionName: "1.9.2", versionCode: 192 },
+  { packageName: "com.example.cafequestlocal", label: "CafeQuest Local", versionName: "1.0.0", versionCode: 1 },
+];
+
+/**
+ * Which installed package a launch command refers to. Dashboard installed-app
+ * launches carry it in the game id; configured games only carry a display name.
+ */
+export function resolveSimPackage(gameId: string, gameName: string): string | null {
+  if (gameId.startsWith("installed:")) {
+    const packageName = gameId.slice("installed:".length);
+    return SIM_INSTALLED_APPS.some((a) => a.packageName === packageName) ? packageName : null;
+  }
+  return SIM_INSTALLED_APPS.find((a) => a.label === gameName)?.packageName ?? null;
+}
+
+/**
+ * Deterministic device UUIDs for `--stable` runs (P0-D): restarting the
+ * simulator reuses the same identities instead of cluttering the database.
+ * Valid v4 UUIDs: version nibble 4, variant nibble 8.
+ */
+export function stableDeviceId(index: number): string {
+  const n = Math.max(1, Math.min(99, Math.floor(index)));
+  return `00000000-0000-4000-8000-0000000000${String(n).padStart(2, "0")}`;
+}
+
+/**
  * Simulated Quest agent: connects to the server, says hello, sends telemetry
  * every 5s, and handles launch commands exactly like the real agent protocol.
  */
@@ -36,6 +70,8 @@ export class DeviceSim {
   private closedByUser = false;
   battery: BatteryState;
   expectedGame: ExpectedGame | null = null;
+  /** Mirrors the agent's UsageStats view: the game currently in the foreground. */
+  foregroundApp: { packageName: string; startedAt: string } | null = null;
   stats: DeviceStats = { commandsReceived: 0, acksSent: 0, resultsSent: 0, reconnects: 0 };
   connected = false;
 
@@ -96,8 +132,18 @@ export class DeviceSim {
         deviceName: this.opts.name,
         deviceModel: this.opts.model ?? "Quest 3",
         agentVersion: "0.1.0-sim",
+        capabilities: ["launch_android_package"],
       });
       ws.send(JSON.stringify(hello));
+      // Real agents report their inventory once per connection; the server needs
+      // it before any foreground package can resolve to a game.
+      ws.send(JSON.stringify({
+        type: "installed_apps",
+        protocolVersion: 1,
+        deviceId: this.deviceId,
+        scannedAt: new Date().toISOString(),
+        apps: SIM_INSTALLED_APPS,
+      }));
       this.opts.log?.(`${this.opts.name} connected`);
       const interval = this.opts.telemetryIntervalMs ?? 5000;
       this.telemetryTimer = setInterval(() => this.sendTelemetry(), interval);
@@ -109,7 +155,8 @@ export class DeviceSim {
       try { msg = JSON.parse(text); } catch { return; }
       if (msg?.type === "command" && msg?.command === "launch_app") {
         this.stats.commandsReceived += 1;
-        ws.send(JSON.stringify({ type: "command_ack", protocolVersion: 1, commandId: msg.commandId, status: "received" }));
+        const ack = { type: "command_ack", protocolVersion: 1, commandId: msg.commandId, status: "received", deviceId: this.deviceId };
+        ws.send(JSON.stringify(ack));
         this.stats.acksSent += 1;
         const game: ExpectedGame = {
           gameId: msg.payload.gameId,
@@ -119,16 +166,17 @@ export class DeviceSim {
         const behavior = this.opts.launchBehavior ?? "succeed";
         if (behavior === "succeed") {
           this.expectedGame = game;
+          this.setForegroundPackage(resolveSimPackage(game.gameId, game.name));
           setTimeout(() => {
             try {
-              ws.send(JSON.stringify({ type: "command_result", protocolVersion: 1, commandId: msg.commandId, status: "success" }));
+              ws.send(JSON.stringify({ type: "command_result", protocolVersion: 1, commandId: msg.commandId, status: "success", deviceId: this.deviceId }));
               this.stats.resultsSent += 1;
             } catch { /* socket gone */ }
           }, 300);
         } else if (behavior === "fail") {
           setTimeout(() => {
             try {
-              ws.send(JSON.stringify({ type: "command_result", protocolVersion: 1, commandId: msg.commandId, status: "failed", error: "TARGET_NOT_INSTALLED" }));
+              ws.send(JSON.stringify({ type: "command_result", protocolVersion: 1, commandId: msg.commandId, status: "failed", error: "TARGET_NOT_INSTALLED", deviceId: this.deviceId }));
               this.stats.resultsSent += 1;
             } catch { /* socket gone */ }
           }, 300);
@@ -154,16 +202,30 @@ export class DeviceSim {
     });
   }
 
-  private sendTelemetry(): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.battery = stepBattery(this.battery, 1);
-    const tel = makeTelemetry({
+  /** Re-reporting the same package keeps its original start time, as the agent does. */
+  setForegroundPackage(packageName: string | null): void {
+    if (packageName === null) {
+      this.foregroundApp = null;
+      return;
+    }
+    if (this.foregroundApp?.packageName === packageName) return;
+    this.foregroundApp = { packageName, startedAt: new Date().toISOString() };
+  }
+
+  buildTelemetry(): Telemetry {
+    return makeTelemetry({
       deviceId: this.deviceId,
       timestamp: new Date().toISOString(),
       battery: { level: this.battery.level, charging: this.battery.charging },
       agent: { foreground: true },
       expectedCurrentGame: this.expectedGame,
+      usage: { accessGranted: true, foregroundApp: this.foregroundApp },
     });
-    try { this.ws.send(JSON.stringify(tel)); } catch { /* ignore */ }
+  }
+
+  private sendTelemetry(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.battery = stepBattery(this.battery, 1);
+    try { this.ws.send(JSON.stringify(this.buildTelemetry())); } catch { /* ignore */ }
   }
 }

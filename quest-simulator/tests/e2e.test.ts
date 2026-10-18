@@ -7,7 +7,18 @@ import WebSocket from "ws";
 import { buildApp } from "../../server/src/app.js";
 import { DeviceSim } from "../src/deviceSim.js";
 
-const { app, db } = await buildApp({ dbPath: ":memory:", port: 0, host: "127.0.0.1" });
+// E2E drives real launches, so it seeds real (test-only) Meta App IDs;
+// placeholder IDs are rejected by design (see server/tests/config.test.ts).
+const { app, db } = await buildApp({
+  dbPath: ":memory:",
+  port: 0,
+  host: "127.0.0.1",
+  games: [
+    { id: "beat-saber", name: "Beat Saber", metaAppId: "test-beat-saber", enabled: true },
+    { id: "walkabout-mini-golf", name: "Walkabout Mini Golf", metaAppId: "test-walkabout", enabled: true },
+    { id: "eleven-table-tennis", name: "Eleven Table Tennis", metaAppId: "test-eleven", enabled: true },
+  ],
+});
 await app.listen({ port: 0, host: "127.0.0.1" });
 const addr = app.server.address();
 const port = typeof addr === "object" && addr ? addr.port : 0;
@@ -88,6 +99,31 @@ test("simulated shift: connect, session, launch, switch, failure, timeout, recon
   await waitUntil(async () => {
     const d = await deviceState(sim.deviceId);
     return d?.expectedGame?.name === "Beat Saber";
+  });
+
+  // The real foreground game (UsageStats path) reaches the dashboard snapshot,
+  // resolved from the reported inventory rather than from the launch request.
+  await waitUntil(async () => {
+    const d = await deviceState(sim.deviceId);
+    return d?.foregroundApp?.packageName === "com.beatgames.beatsaber";
+  });
+  const playing = await deviceState(sim.deviceId);
+  assert.equal(playing.usageAccessGranted, true);
+  assert.ok(Date.parse(playing.foregroundApp.startedAt) > 0);
+
+  // An app absent from the Meta catalog launches through its Android package.
+  const packageLaunch = await fetch(`${base}/api/devices/${sim.deviceId}/launch-installed`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ packageName: "com.example.cafequestlocal" }),
+  });
+  assert.equal(packageLaunch.status, 202);
+  await waitUntil(() => sim.expectedGame?.gameId === "installed:com.example.cafequestlocal");
+  await waitUntil(() => {
+    const lastCmd = db
+      .prepare(`SELECT status FROM commands WHERE device_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(sim.deviceId) as any;
+    return lastCmd?.status === "success";
   });
 
   // Game A -> Game B switch (the critical experiment, simulated)

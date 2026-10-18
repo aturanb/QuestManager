@@ -15,7 +15,8 @@
     "dev": "npm run dev -w server & npm run dev -w dashboard & wait",
     "server": "npm run dev -w server",
     "dashboard": "npm run dev -w dashboard",
-    "simulator": "npm run build -w quest-simulator && node quest-simulator/dist/quest-simulator/src/cli.js"
+    "simulator": "npm run build -w quest-simulator && node quest-simulator/dist/quest-simulator/src/cli.js",
+    "catalog:update": "npm run catalog:update -w server"
   },
   "engines": {
     "node": ">=22"

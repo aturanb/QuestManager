@@ -4,7 +4,7 @@ import { backoffDelayMs } from "../src/backoff.js";
 import { normalizeBattery, stepBattery } from "../src/battery.js";
 import { makeHello, makeTelemetry } from "../src/protocolClient.js";
 import { TelemetrySchema, HelloSchema } from "@cafequest/shared";
-import { DeviceSim } from "../src/deviceSim.js";
+import { DeviceSim, SIM_INSTALLED_APPS, resolveSimPackage, stableDeviceId } from "../src/deviceSim.js";
 
 test("backoff schedule matches brief §25", () => {
   assert.equal(backoffDelayMs(0), 1000);
@@ -43,10 +43,53 @@ test("sim-built hello and telemetry pass shared schemas", () => {
   assert.equal(TelemetrySchema.safeParse(tel).success, true);
 });
 
+test("stableDeviceId yields deterministic valid UUIDs (P0-D)", () => {
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  assert.match(stableDeviceId(1), uuidRe);
+  assert.equal(stableDeviceId(3), stableDeviceId(3));
+  assert.notEqual(stableDeviceId(1), stableDeviceId(2));
+  assert.match(stableDeviceId(8), uuidRe);
+});
+
 test("launch behavior switch mutates sim without hardware", () => {
   const sim = new DeviceSim({ name: "T", serverUrl: "ws://localhost:1", battery: { level: 50, charging: false } });
   assert.equal(sim.expectedGame, null);
   sim.setLaunchBehavior("fail");
   sim.setCharging(true);
   assert.equal(sim.battery.charging, true);
+});
+
+test("sim resolves a launch command to one of its own installed packages", () => {
+  const beatSaber = SIM_INSTALLED_APPS.find((a) => a.label === "Beat Saber");
+  assert.ok(beatSaber, "fixture should include Beat Saber");
+
+  // Dashboard installed-app launches carry the package in the game id.
+  assert.equal(
+    resolveSimPackage("installed:com.beatgames.beatsaber", "Beat Saber"),
+    "com.beatgames.beatsaber"
+  );
+  // Configured-game launches only carry a display name.
+  assert.equal(resolveSimPackage("beat-saber", "Beat Saber"), beatSaber.packageName);
+  // A game the sim does not have installed reports no foreground package.
+  assert.equal(resolveSimPackage("some-other-game", "Some Other Game"), null);
+});
+
+test("sim telemetry reports usage access and the current foreground app", () => {
+  const sim = new DeviceSim({ name: "T", serverUrl: "ws://localhost:1", battery: { level: 50, charging: false } });
+  assert.equal(sim.foregroundApp, null);
+
+  const first = sim.buildTelemetry();
+  assert.equal(TelemetrySchema.safeParse(first).success, true);
+  assert.equal(first.usage?.accessGranted, true);
+  assert.equal(first.usage?.foregroundApp, null);
+
+  sim.setForegroundPackage("com.beatgames.beatsaber");
+  const second = sim.buildTelemetry();
+  assert.equal(TelemetrySchema.safeParse(second).success, true);
+  assert.equal(second.usage?.foregroundApp?.packageName, "com.beatgames.beatsaber");
+  const startedAt = second.usage?.foregroundApp?.startedAt;
+
+  // Re-reporting the same package keeps the original start time, as the agent does.
+  sim.setForegroundPackage("com.beatgames.beatsaber");
+  assert.equal(sim.buildTelemetry().usage?.foregroundApp?.startedAt, startedAt);
 });

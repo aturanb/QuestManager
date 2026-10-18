@@ -32,7 +32,7 @@ SDK compiles but cannot initialize at runtime.
 
 | Item | Decision |
 |---|---|
-| Meta App ID | User supplies via `cafequest.config.json` → `metaAppId` (never invented here) |
+| Meta App ID | User records it in `cafequest.config.json` and enters the same value in each headset's setup screen; the agent persists it locally (never invented here) |
 | Game Meta App IDs | Placeholders in the same config file until sourced from official data (§19) |
 | Foreground-game detection | Not implemented: no supported public API documented; package-inspection permissions are prohibited (§6/§18). We track `expectedCurrentGame` only. |
 | Quest 2 support | UNVERIFIED: the current SDK setup guide samples minSdk API 35; whether this SDK version runs on Quest 2's Horizon OS base must be confirmed on hardware (or via the legacy Oculus Platform SDK fallback). |

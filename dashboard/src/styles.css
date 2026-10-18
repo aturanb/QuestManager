@@ -1,0 +1,550 @@
+/*
+ * CafeQuest floor board.
+ * One dark theme on purpose: VR rooms are dim, and the headset app uses the same
+ * tokens, so the counter PC, a phone and the headset read as one tool.
+ * Colors carry meaning only through the four bay states below.
+ * No web fonts: the café LAN has no guaranteed internet, so type comes from the
+ * system stack and gets its character from weight, size and tabular figures.
+ */
+:root {
+  color-scheme: dark;
+
+  --board: #0f1620;
+  --bay: #18212c;
+  --raised: #212c39;
+  --rail: #2c3846;
+  --chalk: #e8eef5;
+  --chalk-dim: #8d9aab;
+
+  --ready: #58d3d0; /* online and free */
+  --live: #ffb020; /* clock running */
+  --alert: #f25c5c; /* time up, last minutes, low battery, errors */
+  --idle: #5b6878; /* offline */
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --r-bay: 12px;
+  --r-ctl: 8px;
+  --tap: 44px;
+  --gutter: 16px;
+  --head: 140px; /* sticky header height, for jump-to-card offsets */
+}
+
+@media (min-width: 900px) {
+  :root { --gutter: 24px; --head: 84px; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--board); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--board);
+  color: var(--chalk);
+  font: 15px/1.45 var(--font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, p, dl, dd, ol { margin: 0; }
+code {
+  font: 0.85em/1.3 var(--mono);
+  background: var(--raised);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
+
+/* ---- header: brand, the floor at a glance, feed status ------------------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "brand summary feed controller lang";
+  align-items: center;
+  gap: 10px 24px;
+  padding: 12px var(--gutter);
+  background: var(--board);
+  border-bottom: 1px solid var(--rail);
+}
+.topbar .brand { grid-area: brand; font-size: 1.15rem; font-weight: 750; letter-spacing: -0.015em; }
+.summary { grid-area: summary; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; min-width: 0; }
+
+.pips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; list-style: none; }
+.pip {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--pip, var(--idle));
+  color: var(--board);
+  font-size: 0.8125rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+.pip[data-state="playing"], .pip[data-state="unlimited"] { --pip: var(--live); }
+.pip[data-state="ending"], .pip[data-state="timeup"] { --pip: var(--alert); }
+.pip[data-state="free"] { --pip: var(--ready); }
+/* Hollow, not just grey: offline stays distinct without relying on color. */
+.pip[data-state="offline"] { background: transparent; box-shadow: inset 0 0 0 2px var(--idle); }
+
+.tally { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.875rem; color: var(--chalk-dim); }
+.tally span[data-state]::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--swatch, var(--idle));
+}
+.tally [data-state="playing"] { --swatch: var(--live); }
+.tally [data-state="timeup"] { --swatch: var(--alert); color: var(--chalk); font-weight: 600; }
+.tally [data-state="free"] { --swatch: var(--ready); }
+.tally [data-state="offline"]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--idle); }
+
+.feed { grid-area: feed; display: flex; align-items: center; gap: 7px; font-size: 0.875rem; color: var(--chalk-dim); white-space: nowrap; }
+.feed::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+.feed[data-live="true"] { color: var(--chalk); }
+.feed[data-live="true"]::before { background: var(--ready); }
+
+/* Optional controller-battery monitoring: one global switch, off by default. */
+.controller-toggle { grid-area: controller; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.controller-copy { display: grid; gap: 2px; min-width: 0; }
+.controller-label { font-size: 0.8125rem; font-weight: 700; color: var(--chalk-dim); white-space: nowrap; }
+.controller-toggle[data-enabled="true"] .controller-label { color: var(--chalk); }
+.controller-status { font-size: 0.75rem; color: var(--chalk-dim); white-space: nowrap; }
+.controller-error { font-size: 0.75rem; font-weight: 600; color: var(--alert); }
+/* A switch, not a checkbox: keyboard operable and state exposed via aria-checked. */
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--rail);
+  border-radius: 999px;
+  background: var(--raised);
+  cursor: pointer;
+}
+.switch[aria-checked="true"] { border-color: var(--ready); background: color-mix(in srgb, var(--ready) 25%, var(--raised)); }
+.switch:disabled { opacity: 0.5; cursor: progress; }
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--chalk-dim);
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+.switch[aria-checked="true"] .switch-knob { transform: translateX(20px); background: var(--ready); }
+
+/* Screen-reader-only helper text (the switch's aria-describedby target). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Board language: two-way switch, pressed side is live. Remembered per browser. */
+.lang { grid-area: lang; display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--rail); border-radius: var(--r-ctl); }
+.lang button {
+  min-width: 40px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--chalk-dim);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.lang button:hover { color: var(--chalk); }
+.lang button[aria-pressed="true"] { background: var(--raised); color: var(--chalk); }
+
+@media (max-width: 719px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "brand feed lang" "controller controller controller" "summary summary summary";
+  }
+  .controller-toggle { flex-wrap: wrap; }
+}
+
+/* ---- the board ------------------------------------------------------------ */
+/* A mouse at the counter gets denser controls, so the whole floor fits one screen; touch keeps 44px. */
+.shell { --tap: 36px; max-width: 1680px; margin: 0 auto; padding: 16px var(--gutter) 32px; }
+@media (pointer: coarse) { .shell { --tap: 44px; } }
+.board { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+
+.selection-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
+.selection-count { color: var(--chalk-dim); font-size: 0.875rem; font-weight: 650; }
+.selection-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+
+.bay {
+  --state: var(--idle);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 12px 19px;
+  background: var(--bay);
+  border: 1px solid var(--rail);
+  border-radius: var(--r-bay);
+  overflow: hidden;
+  scroll-margin-top: calc(var(--head) + 12px);
+  /* The clock and the facts size to the bay, not the window. */
+  container-type: inline-size;
+}
+/* The state edge: readable from across the room before any text is. */
+.bay::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--state); }
+.bay[data-state="playing"], .bay[data-state="unlimited"] { --state: var(--live); }
+.bay[data-state="ending"], .bay[data-state="timeup"] { --state: var(--alert); }
+.bay[data-state="free"] { --state: var(--ready); }
+.bay[data-online="false"] { background: #141c26; }
+.bay[data-selected="true"] { border-color: var(--ready); box-shadow: inset 0 0 0 1px var(--ready); }
+/* The only ambient motion on the page: a session in its last minutes. */
+.bay[data-state="ending"]::before { animation: ending 1.6s ease-in-out infinite; }
+@keyframes ending { 50% { opacity: 0.25; } }
+/* Answer a pip tap: show which card it jumped to. */
+.bay:target { animation: arrive 1.4s ease-out 1; }
+@keyframes arrive { from { box-shadow: 0 0 0 3px var(--state); } to { box-shadow: 0 0 0 3px transparent; } }
+
+/* The complete device name owns the first row and may wrap. Link state sits below
+   it, so it never competes with or hides a staff-assigned name. */
+.bay-head { display: flex; align-items: flex-start; gap: 2px; min-height: 28px; }
+.bay-identity { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.bay-name { display: flex; align-items: flex-start; gap: 2px; min-width: 0; }
+/* Selection remains a full tap target in its own column beside both identity rows. */
+.bay-select {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  margin: 0 0 0 -8px;
+  cursor: pointer;
+}
+.bay-select input { width: 18px; height: 18px; margin: 0; accent-color: var(--ready); cursor: pointer; }
+.action-scope { color: var(--ready); font-size: 0.8125rem; font-weight: 650; }
+.bay-head h2 { flex: 1 1 auto; min-width: 0; font-size: 1.0625rem; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.icon-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--chalk-dim);
+  cursor: pointer;
+}
+.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn:hover { background: var(--raised); color: var(--chalk); }
+/* Touch targets grow without overhanging the connection row. */
+@media (pointer: coarse) {
+  .icon-btn { width: var(--tap); height: var(--tap); }
+}
+.rename-form { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rename-form input { flex: 1 1 8rem; min-width: 0; }
+.link-state { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 0.8125rem; color: var(--chalk-dim); }
+.link-state span { min-width: 0; overflow-wrap: anywhere; }
+.link-state::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
+.bay[data-online="true"] .link-state::before { background: var(--ready); }
+
+/* Clock and caption read as one line, the meter under both. The minimum height is the
+   running clock's, so every bay's facts start on the same line across the board. */
+.readout {
+  --clock: clamp(2.25rem, 1.5rem + 4cqi, 2.75rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: center;
+  gap: 2px 10px;
+  min-height: calc(var(--clock) + 14px);
+}
+.clock { font-size: var(--clock); line-height: 1; font-weight: 650; letter-spacing: -0.035em; }
+.bay[data-state="ending"] .clock { color: var(--alert); }
+.word { font-size: clamp(1.625rem, 1.1rem + 3cqi, 2rem); line-height: 1.1; font-weight: 650; letter-spacing: -0.025em; color: var(--state); }
+.caption { font-size: 0.875rem; color: var(--chalk-dim); }
+.meter { flex-basis: 100%; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.meter span { display: block; height: 100%; border-radius: inherit; background: var(--state); transition: width 1s linear; }
+
+/* Labels share one column and values the next, so a long value wraps inside its own
+   column instead of into its label. Model joins Battery's row while the bay is wide enough. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content fit-content(9rem);
+  align-items: baseline;
+  gap: 4px 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rail);
+}
+.facts > div { display: contents; }
+.facts dt { grid-column: 1; font-size: 0.8125rem; color: var(--chalk-dim); white-space: nowrap; }
+.facts dd { grid-column: 2 / -1; min-width: 0; font-size: 0.875rem; font-weight: 550; overflow-wrap: anywhere; }
+.facts .fact-battery dd { grid-column: 2; }
+.facts .fact-model dt { grid-column: 3; }
+.facts .fact-model dd { grid-column: 4; }
+@container (max-width: 299px) {
+  .facts .fact-battery dd, .facts .fact-model dd { grid-column: 2 / -1; }
+  .facts .fact-model dt { grid-column: 1; }
+}
+
+/* Baseline on the percentage, so it lines up with its label; the cells just sit centered.
+   In a narrow bay "charging" wraps under the percentage rather than into Model. */
+.battery { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.battery .cells { align-self: center; }
+.battery .pct, .charging { white-space: nowrap; }
+.cells { position: relative; display: inline-flex; gap: 2px; padding: 2px; border: 1.5px solid var(--chalk-dim); border-radius: 4px; }
+.cells::after { content: ""; position: absolute; top: 50%; right: -4.5px; width: 2.5px; height: 6px; margin-top: -3px; border-radius: 0 1px 1px 0; background: var(--chalk-dim); }
+.cells i { width: 5px; height: 10px; border-radius: 1px; }
+.cells i[data-lit="true"] { background: var(--cell, var(--chalk)); }
+.battery[data-tone="mid"] { --cell: var(--live); }
+.battery[data-tone="low"] { --cell: var(--alert); }
+.battery[data-tone="low"] .pct { color: var(--alert); }
+.charging { font-size: 0.8125rem; font-weight: 400; color: var(--chalk-dim); }
+
+/* Controller badges get their own row under the headset battery: compact, and never
+   colour-only. The update time and any hint wrap whole underneath the badges. */
+.controllers { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.controller-badge {
+  padding: 0 6px;
+  border: 1px solid var(--rail);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.5;
+  color: var(--chalk);
+  white-space: nowrap;
+}
+/* Last known: a sleeping controller keeps its number, dimmed and labelled. */
+.controller-badge[data-state="inactive"],
+.controller-badge[data-state="stale"],
+.controller-badge[data-state="unavailable"] { color: var(--chalk-dim); }
+.controller-badge[data-state="stale"] { border-style: dashed; }
+.controller-last { margin-left: 4px; font-weight: 500; font-size: 0.6875rem; }
+.controller-updated { font-size: 0.75rem; font-weight: 500; color: var(--chalk-dim); }
+.controller-hint { flex-basis: 100%; font-size: 0.75rem; font-weight: 500; color: var(--chalk-dim); }
+
+/* ---- controls ------------------------------------------------------------- */
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.bay .controls { gap: 6px; }
+.controls.start, .controls.session { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.controls.start .custom { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+/* Room for a typed length first: on the narrowest phones Unlimited drops to its own line. */
+.controls.start .custom .minutes { flex-basis: 6rem; }
+/* An unlimited session has nothing to extend: Stop takes the whole row. */
+.controls.session .btn-stop:only-child { grid-column: 1 / -1; }
+.controls.launch { flex-wrap: nowrap; }
+.controls.launch select { flex: 1 1 auto; min-width: 0; }
+
+.btn {
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-ctl);
+  background: var(--raised);
+  color: var(--chalk);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--chalk-dim); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { padding: 0 22px; border-color: var(--chalk); background: var(--chalk); color: var(--board); }
+.btn-primary:hover:not(:disabled) { border-color: #fff; background: #fff; }
+.btn-stop { color: var(--alert); }
+.btn-stop:hover:not(:disabled) { border-color: var(--alert); }
+.btn-remove { border-color: var(--alert); background: var(--alert); color: var(--board); }
+.btn-remove:hover:not(:disabled) { border-color: #ff7b7b; background: #ff7b7b; }
+.btn-text {
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--chalk-dim);
+  font: inherit;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  text-decoration-color: var(--rail);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.btn-text:hover { color: var(--alert); text-decoration-color: currentColor; }
+
+select, input {
+  min-height: var(--tap);
+  padding: 0 12px;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-ctl);
+  background-color: var(--board);
+  color: var(--chalk);
+  font: inherit;
+  font-size: 1rem; /* 16px keeps iOS from zooming on focus */
+}
+select {
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238d9aab' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  text-overflow: ellipsis;
+}
+select:disabled, input:disabled { opacity: 0.5; }
+input::placeholder { color: var(--chalk-dim); }
+
+.minutes { position: relative; display: flex; flex: 1 1 auto; }
+.minutes input { width: 100%; padding-right: 46px; }
+.minutes span { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); font-size: 0.875rem; color: var(--chalk-dim); pointer-events: none; }
+
+.note { padding: 8px 10px; border-radius: var(--r-ctl); background: var(--raised); font-size: 0.875rem; font-weight: 550; color: var(--chalk-dim); }
+.note[data-tone="ok"] { color: var(--ready); }
+.note[data-tone="bad"] { background: #33212a; color: #ff8a8a; }
+.bay .note { padding: 6px 10px; font-size: 0.8125rem; }
+
+/* ---- occasional tools: app IDs, removal, live view ------------------------- */
+/* One line at the foot of the bay. Each piece wraps whole, live view keeps the right
+   edge, and an opened panel or removal question takes the full width below. */
+.bay-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--rail); }
+.bay-tools .live-view { margin-left: auto; }
+.bay-tools .live-view .btn { padding: 0 10px; font-size: 0.8125rem; }
+.bay-tools .remove-btn { font-size: 0.8125rem; }
+.bay-tools .confirm { flex-basis: 100%; order: 1; }
+
+/* ---- installed app identifiers and optional Meta mapping ------------------ */
+.app-id-list[open] { flex-basis: 100%; }
+.app-id-list summary { padding: 4px 0; font-size: 0.8125rem; font-weight: 600; color: var(--chalk-dim); white-space: nowrap; cursor: pointer; }
+.app-id-list summary:hover, .app-id-list[open] summary { color: var(--chalk); }
+.hint { margin: 6px 0 2px; font-size: 0.8125rem; color: var(--chalk-dim); }
+.mapping { display: grid; gap: 8px; padding: 10px 0; }
+.mapping + .mapping { border-top: 1px dashed var(--rail); }
+.mapping-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; }
+.app-source { font-size: 0.75rem; color: var(--chalk-dim); }
+.app-identifiers { display: grid; gap: 3px; margin-top: 6px; }
+.app-identifiers div { display: grid; grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.app-identifiers dt { font-size: 0.75rem; color: var(--chalk-dim); }
+.app-identifiers dd { min-width: 0; font-size: 0.75rem; overflow-wrap: anywhere; }
+.app-identifiers code { padding: 0; background: none; color: var(--chalk); overflow-wrap: anywhere; }
+.mapping-entry { display: flex; gap: 8px; }
+.mapping-field { display: grid; flex: 1 1 auto; gap: 4px; min-width: 0; }
+.mapping-field span { font-size: 0.75rem; color: var(--chalk-dim); }
+.mapping-entry input { width: 100%; min-width: 0; }
+
+/* ---- removing a stale headset ---------------------------------------------- */
+.confirm { display: grid; gap: 8px; padding-top: 4px; }
+.confirm p { font-size: 0.875rem; }
+.confirm .btn { flex: 1 1 0; }
+
+/* ---- live view -------------------------------------------------------------- */
+.cast-panel {
+  position: fixed;
+  right: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 20;
+  display: grid;
+  gap: 14px;
+  width: min(880px, calc(100vw - 2 * var(--gutter)));
+  max-height: calc(100vh - 2 * var(--gutter));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-bay);
+  background: var(--bay);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48);
+}
+.cast-panel[data-minimized="true"] { width: min(440px, calc(100vw - 2 * var(--gutter))); }
+.cast-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.cast-title { display: grid; gap: 4px; min-width: 0; }
+.cast-head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cast-head h2 { font-size: 1.15rem; font-weight: 650; overflow-wrap: anywhere; }
+.cast-phase { display: flex; align-items: center; gap: 7px; font-size: 0.875rem; color: var(--chalk-dim); white-space: nowrap; }
+.cast-phase::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+.cast-phase[data-phase="live"] { color: var(--chalk); }
+.cast-phase[data-phase="live"]::before { background: var(--alert); }
+.cast-phase[data-phase="failed"] { color: var(--alert); }
+.cast-phase[data-phase="failed"]::before { background: var(--alert); }
+.cast-content { display: grid; gap: 14px; }
+.cast-body { color: var(--chalk-dim); }
+.cast-video {
+  position: relative;
+  /* As wide as the panel allows, but never taller than the screen can hold with the controls around it. */
+  width: min(100%, max(320px, calc((100vh - 430px) * 16 / 9)));
+  margin-inline: auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--rail);
+  border-radius: var(--r-ctl);
+  background: #000;
+  overflow: hidden;
+}
+.cast-video:fullscreen { width: 100vw; margin: 0; border: 0; border-radius: 0; aspect-ratio: auto; }
+.cast-fullscreen { position: absolute; right: 10px; top: 10px; background: rgba(0, 0, 0, 0.62); opacity: 0.85; }
+.cast-fullscreen:hover, .cast-fullscreen:focus-visible { opacity: 1; }
+.cast-video video { width: 100%; height: 100%; object-fit: contain; }
+.cast-video .note { position: absolute; inset: auto 10px 10px 10px; margin: 0; }
+.cast-controls { justify-content: flex-end; }
+.cast-launch { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--rail); }
+.cast-launch h3 { font-size: 0.95rem; font-weight: 650; }
+.resume-prompt { width: min(440px, calc(100vw - 2 * var(--gutter))); }
+.resume-prompt h2 { font-size: 1.15rem; font-weight: 650; }
+
+/* ---- page states ------------------------------------------------------------ */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--alert);
+  border-radius: var(--r-bay);
+  background: #2a1a22;
+}
+.empty { max-width: 56ch; margin: 12vh auto 0; }
+.empty h2 { margin-bottom: 8px; font-size: 1.5rem; font-weight: 650; letter-spacing: -0.015em; }
+.empty p { color: var(--chalk-dim); }
+
+.foot { max-width: 1680px; margin: 0 auto; padding: 20px var(--gutter) 32px; }
+.catalog { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-top: 20px; border-top: 1px solid var(--rail); }
+.catalog-status { font-size: 0.875rem; color: var(--chalk-dim); }
+
+.gate { display: grid; place-items: center; min-height: 100vh; padding: var(--gutter); }
+.keyprompt { display: grid; gap: 12px; width: min(100%, 440px); padding: 28px; border: 1px solid var(--rail); border-radius: var(--r-bay); background: var(--bay); }
+.keyprompt-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.keyprompt .brand { font-weight: 750; color: var(--chalk-dim); }
+.keyprompt h2 { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.015em; }
+.keyprompt > p:not(.brand) { color: var(--chalk-dim); }
+.keyprompt form { display: flex; gap: 8px; margin-top: 8px; }
+.keyprompt input { flex: 1 1 auto; min-width: 0; }
+
+@media (max-width: 480px) {
+  .keyprompt { padding: 22px 18px; }
+  .keyprompt form { flex-direction: column; }
+  .cast-panel { padding: 16px; }
+  .cast-head { grid-template-columns: 1fr; }
+  .cast-head-actions { justify-content: stretch; }
+  .cast-head-actions .btn { flex: 1 1 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bay[data-state="ending"]::before, .bay:target { animation: none; }
+  .meter span { transition: none; }
+}
