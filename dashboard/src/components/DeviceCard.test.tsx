@@ -95,6 +95,18 @@ describe("DeviceCard", () => {
     expect(screen.getByRole("button", { name: /launch game/i })).toBeDisabled();
   });
 
+  it("keeps a long device name whole with connection status grouped underneath", () => {
+    const name = "A Very Long Quest Headset Name That Must Stay Complete";
+    const view = render(<DeviceCard {...props({
+      device: device({ name, online: false, lastSeenAt: new Date(NOW - 4 * 60_000).toISOString() }),
+    })} />);
+    const identity = view.container.querySelector(".bay-identity");
+    expect(identity).not.toBeNull();
+    expect(identity?.querySelector("h2")).toHaveTextContent(name);
+    expect(identity?.children[0]).toHaveClass("bay-name");
+    expect(identity?.children[1]).toHaveClass("link-state");
+  });
+
   it("expired session stays visible and offers a new session instead of invalid active-session actions", () => {
     const p = props({
       device: device({ session: { id: "s1", startedAt: "t", endsAt: new Date(NOW - 1000).toISOString(), status: "expired" } }),
@@ -441,7 +453,7 @@ describe("DeviceCard in Turkish", () => {
     const p = props({ device: device({ online: false, lastSeenAt: new Date(NOW - 4 * 60_000).toISOString() }) });
     renderTurkish(<DeviceCard {...p} />);
     expect(screen.getByText("Son görülme 4 dk önce")).toBeInTheDocument();
-    expect(screen.getByText("Açık ve kafe Wi-Fi ağına bağlı olduğunu kontrol edin")).toBeInTheDocument();
+    expect(screen.getByText("Kafe Wi-Fi ağına bağlı olduğunu kontrol edin")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Quest 01 gözlüğünde oyunu aç" })).toHaveAttribute("title", "Gözlük çevrimdışı");
 
     fireEvent.click(screen.getByRole("button", { name: "Quest 01 gözlüğünü panodan kaldır" }));

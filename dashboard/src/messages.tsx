@@ -23,6 +23,8 @@ const en = {
     secondsAgo: (s: number) => `${s}s ago`,
     minutesAgo: (m: number) => `${m} min ago`,
     hoursAgo: (h: number, m: number) => `${h}h ${m}m ago`,
+    wholeHoursAgo: (h: number) => `${h}h ago`,
+    daysAgo: (d: number) => `${d}d ago`,
   },
   app: {
     live: "Live",
@@ -292,6 +294,8 @@ const tr: Messages = {
     secondsAgo: (s) => `${s} sn önce`,
     minutesAgo: (m) => `${m} dk önce`,
     hoursAgo: (h, m) => `${h} sa ${m} dk önce`,
+    wholeHoursAgo: (h) => `${h} sa önce`,
+    daysAgo: (d) => `${d} gün önce`,
   },
   app: {
     live: "Canlı",
@@ -364,7 +368,7 @@ const tr: Messages = {
     free: "Boş",
     freeCaption: "Sıradaki oyuncuya hazır",
     offline: "Çevrimdışı",
-    offlineCaption: "Açık ve kafe Wi-Fi ağına bağlı olduğunu kontrol edin",
+    offlineCaption: "Kafe Wi-Fi ağına bağlı olduğunu kontrol edin",
     battery: "Pil",
     charging: "şarj oluyor",
     controllers: "Kontrolcüler",

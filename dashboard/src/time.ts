@@ -21,7 +21,7 @@ export function formatElapsedSince(startedAtIso: string, nowMs: number, serverOf
   return formatRemaining(elapsed);
 }
 
-/** "4 min ago" style relative label for last-seen, in the words of the active language. */
+/** "4 min ago" style relative label, in the words of the active language. */
 export function formatAgo(
   iso: string | null,
   nowMs: number,
@@ -35,4 +35,21 @@ export function formatAgo(
   const min = Math.floor(sec / 60);
   if (min < 60) return words.minutesAgo(min);
   return words.hoursAgo(Math.floor(min / 60), min % 60);
+}
+
+/** Compact last-seen age: use only the largest whole unit that applies. */
+export function formatLastSeenAgo(
+  iso: string | null,
+  nowMs: number,
+  serverOffsetMs: number,
+  words: Messages["time"] = messages.en.time
+): string {
+  if (!iso) return words.never;
+  const sec = Math.max(0, Math.floor((nowMs + serverOffsetMs - new Date(iso).getTime()) / 1000));
+  if (sec < 60) return words.secondsAgo(sec);
+  const min = Math.floor(sec / 60);
+  if (min < 60) return words.minutesAgo(min);
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return words.wholeHoursAgo(hours);
+  return words.daysAgo(Math.floor(hours / 24));
 }

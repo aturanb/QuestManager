@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Device, DeviceControllerBattery, Game, InstalledApp } from "../types";
 import { bayState, type BayState } from "../bay";
 import { useI18n, type Messages } from "../i18n";
-import { formatAgo, formatElapsedSince, formatRemaining } from "../time";
+import { formatAgo, formatElapsedSince, formatLastSeenAgo, formatRemaining } from "../time";
 import { LaunchSelect, launchSelected, useLaunchPicker } from "./LaunchPicker";
 
 export type DeviceCardProps = {
@@ -337,7 +337,7 @@ export function DeviceCard(props: DeviceCardProps) {
   const connection = device.online
     ? c.online
     : device.lastSeenAt
-      ? c.seen(formatAgo(device.lastSeenAt, now, serverOffsetMs, t.time))
+      ? c.seen(formatLastSeenAgo(device.lastSeenAt, now, serverOffsetMs, t.time))
       : c.neverConnected;
 
   return (
@@ -350,37 +350,41 @@ export function DeviceCard(props: DeviceCardProps) {
       aria-label={c.state(device.name, device.online)}
     >
       <header className="bay-head">
-        <div className="bay-title">
-          {props.onSelectedChange && (
-            <label className="bay-select">
-              <input
-                type="checkbox"
-                aria-label={c.selectLabel(device.name)}
-                checked={props.selected === true}
-                onChange={(event) => props.onSelectedChange?.(device.id, event.target.checked)}
-              />
-            </label>
-          )}
-          {renaming ? (
-            <RenameForm
-              name={device.name}
-              onSave={(name) => {
-                setRenaming(false);
-                props.onRename(device.id, name);
-              }}
-              onCancel={() => setRenaming(false)}
+        {props.onSelectedChange && (
+          <label className="bay-select">
+            <input
+              type="checkbox"
+              aria-label={c.selectLabel(device.name)}
+              checked={props.selected === true}
+              onChange={(event) => props.onSelectedChange?.(device.id, event.target.checked)}
             />
-          ) : (
-            <>
-              {/* One line: a long name truncates instead of breaking mid-word; hover shows it whole. */}
-              <h2 title={device.name}>{device.name}</h2>
-              <button className="icon-btn" aria-label={c.renameLabel(device.name)} title={c.rename} onClick={() => setRenaming(true)}>
-                <PencilIcon />
-              </button>
-            </>
-          )}
+          </label>
+        )}
+        <div className="bay-identity">
+          <div className="bay-name">
+            {renaming ? (
+              <RenameForm
+                name={device.name}
+                onSave={(name) => {
+                  setRenaming(false);
+                  props.onRename(device.id, name);
+                }}
+                onCancel={() => setRenaming(false)}
+              />
+            ) : (
+              <>
+                {/* Keep the complete staff-assigned name visible; long names wrap. */}
+                <h2>{device.name}</h2>
+                <button className="icon-btn" aria-label={c.renameLabel(device.name)} title={c.rename} onClick={() => setRenaming(true)}>
+                  <PencilIcon />
+                </button>
+              </>
+            )}
+          </div>
+          <p className="link-state">
+            <span>{connection}</span>
+          </p>
         </div>
-        <p className="link-state">{connection}</p>
       </header>
 
       <Readout state={state} now={now} serverOffsetMs={serverOffsetMs} />
