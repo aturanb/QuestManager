@@ -11,3 +11,4 @@ quest-agent/.gradle/
 quest-agent/local.properties
 *.log
 .DS_Store
+.env
