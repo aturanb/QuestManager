@@ -40,6 +40,13 @@ export const COMMAND_TIMEOUT_MS = 10_000;
 const SWEEP_INTERVAL_MS = 1_000;
 const DASHBOARD_PUSH_MS = 1_000;
 const AGENT_PING_MS = 5_000;
+const DASHBOARD_PING_MS = 10_000;
+/**
+ * Each snapshot supersedes the last, so a dashboard still this far behind
+ * (asleep, frozen tab, stalled dev proxy) skips pushes instead of queueing
+ * them: an unbounded queue once ran the café server out of heap after ~71 h.
+ */
+const DASHBOARD_MAX_BUFFERED_BYTES = 1024 * 1024;
 export const AGENT_WS_PATH = "/agent-ws";
 export const DASHBOARD_WS_PATH = "/dashboard-ws";
 export const CAST_WS_PATH = "/cast-ws";
@@ -69,7 +76,7 @@ export function sendAgentError(socket: WebSocket, code: ServerError["code"], mes
 
 export class Hub {
   private devices = new Map<string, DeviceConn>();
-  private dashboards = new Set<WebSocket>();
+  private dashboards = new Map<WebSocket, { awaitingPong: boolean }>();
   private timers: NodeJS.Timeout[] = [];
   private log: FastifyInstance["log"];
   /** The single in-memory live-view session; no SQL, no signaling storage. */
@@ -82,7 +89,8 @@ export class Hub {
     private db: Db,
     /** Read live: POST /api/catalog/refresh swaps the catalog without a restart. */
     private catalog: () => AppCatalog,
-    private onDeviceChanged: () => void = () => {}
+    private onDeviceChanged: () => void = () => {},
+    private dashboardPingMs = DASHBOARD_PING_MS
   ) {
     this.log = fastify.log;
     this.cast = new CastCoordinator({
@@ -100,6 +108,7 @@ export class Hub {
     this.timers.push(setInterval(() => this.sweep(), SWEEP_INTERVAL_MS));
     this.timers.push(setInterval(() => this.pushDashboardState(), DASHBOARD_PUSH_MS));
     this.timers.push(setInterval(() => this.pingAgents(), AGENT_PING_MS));
+    this.timers.push(setInterval(() => this.pingDashboards(), this.dashboardPingMs));
   }
 
   stop(): void {
@@ -109,7 +118,7 @@ export class Hub {
     this.timers = [];
     for (const c of this.devices.values()) c.socket.close(1001, "server-stopping");
     this.devices.clear();
-    for (const d of this.dashboards) d.close(1001, "server-stopping");
+    for (const d of this.dashboards.keys()) d.close(1001, "server-stopping");
     this.dashboards.clear();
   }
 
@@ -240,12 +249,17 @@ export class Hub {
   }
 
   addDashboardSocket(socket: WebSocket): void {
-    this.dashboards.add(socket);
+    this.dashboards.set(socket, { awaitingPong: false });
     this.sendToDashboard(socket, this.snapshot());
   }
 
   removeDashboardSocket(socket: WebSocket): void {
     this.dashboards.delete(socket);
+  }
+
+  handleDashboardPong(socket: WebSocket): void {
+    const state = this.dashboards.get(socket);
+    if (state) state.awaitingPong = false;
   }
 
   handleAgentMessage(deviceId: string, socket: WebSocket, raw: string): void {
@@ -406,6 +420,28 @@ export class Hub {
     }
   }
 
+  /**
+   * A dashboard whose peer vanished without closing (laptop asleep, a stalled
+   * dev proxy) never emits "close" by itself; one unanswered ping drops it.
+   * The dashboard reconnects with backoff, so a live tab recovers on its own.
+   */
+  private pingDashboards(): void {
+    for (const [socket, state] of [...this.dashboards]) {
+      if (state.awaitingPong) {
+        this.dashboards.delete(socket);
+        this.log.warn("dashboard socket unresponsive; dropped");
+        socket.terminate();
+        continue;
+      }
+      state.awaitingPong = true;
+      try {
+        socket.ping();
+      } catch {
+        /* closing; its close handler cleans up */
+      }
+    }
+  }
+
   private sweep(): void {
     sweepExpiredSessions(this.db);
     sweepTimedOutCommands(this.db, COMMAND_TIMEOUT_MS);
@@ -482,12 +518,13 @@ export class Hub {
 
   pushDashboardState(): void {
     const snap = this.snapshot();
-    for (const socket of [...this.dashboards]) {
+    for (const socket of [...this.dashboards.keys()]) {
       this.sendToDashboard(socket, snap);
     }
   }
 
   private sendToDashboard(socket: WebSocket, payload: unknown): void {
+    if (socket.bufferedAmount > DASHBOARD_MAX_BUFFERED_BYTES) return;
     try {
       socket.send(JSON.stringify({ type: "state", payload }));
     } catch {

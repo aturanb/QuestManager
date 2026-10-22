@@ -63,6 +63,8 @@ export type AppConfig = {
     pollIntervalMs?: number;
     settleMs?: number;
   };
+  /** Dashboard WebSocket ping cadence; tests shorten it. */
+  dashboardPingMs?: number;
   logger?: { level?: string; stream?: NodeJS.WritableStream };
 };
 
@@ -96,7 +98,7 @@ export async function buildApp(cfg: AppConfig) {
     }
   });
 
-  const hub = new Hub(app, db, () => appCatalog, () => {});
+  const hub = new Hub(app, db, () => appCatalog, () => {}, cfg.dashboardPingMs);
   hub.start();
 
   // Optional diagnostics: best-effort ADB reads, entirely outside the agent
@@ -210,6 +212,7 @@ export async function buildApp(cfg: AppConfig) {
       return;
     }
     hub.addDashboardSocket(socket);
+    socket.on("pong", () => hub.handleDashboardPong(socket));
     socket.on("close", () => hub.removeDashboardSocket(socket));
     socket.on("error", () => hub.removeDashboardSocket(socket));
   });
