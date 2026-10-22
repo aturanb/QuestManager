@@ -18,6 +18,20 @@ npm test
 The server automatically loads the repository-root `.env`. Values exported in
 the shell take precedence over values in that file.
 
+### Café PC (Windows)
+
+Double-click [scripts/windows/start-cafequest.cmd](scripts/windows/start-cafequest.cmd).
+It builds, starts the server and the built dashboard (`vite preview`, same
+ports and proxy as `npm run dev`) in two minimized windows, and opens
+`http://localhost:5173`. Each window restarts its process 5 s after it stops
+and records that in `logs/restarts.log`; close both windows to stop CafeQuest.
+Run it again after pulling changes so they are rebuilt, and run `npm install`
+first when dependencies changed. Run
+[scripts/windows/install-shortcuts.cmd](scripts/windows/install-shortcuts.cmd)
+once to add Desktop and Startup shortcuts, so CafeQuest starts when that
+Windows user signs in. Root `npm run dev` is POSIX-only: `cmd.exe` runs its
+`&` commands one after another, so it never gets past the server.
+
 The catalog is optional for sideloaded apps: CafeQuest can list and launch them
 directly by Android package ID. `catalog:update` and the dashboard's **Update
 app list** button enrich official apps with their names and numeric Meta App
