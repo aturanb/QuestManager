@@ -25,16 +25,22 @@ import { BoardSummary } from "./components/BoardSummary";
 import { CatalogButton } from "./components/CatalogButton";
 import { ControllerBatteryToggle } from "./components/ControllerBatteryToggle";
 import { DeviceCard } from "./components/DeviceCard";
+import { DeviceBoard } from "./components/DeviceBoard";
 import { KeyPrompt } from "./components/KeyPrompt";
 import { LangToggle } from "./components/LangToggle";
 import { LiveViewModal } from "./components/LiveViewModal";
+import { NotesPage, type NoteDrafts } from "./components/NotesPage";
 import { ResumeAppPrompt } from "./components/ResumeAppPrompt";
 import { SelectionBar } from "./components/SelectionBar";
 import { castRequestError, friendlyError } from "./errors";
 import { resumableApp, type ResumeApp } from "./resume-app";
 import { useI18n } from "./i18n";
+import { useDeviceOrder } from "./useDeviceOrder";
 
 const KEY_STORAGE = "cq-admin-key";
+
+type Page = "headsets" | "notes";
+const currentPage = (): Page => window.location.hash === "#/notes" ? "notes" : "headsets";
 
 type BulkResult =
   | { originDeviceId: string; action: "session"; succeeded: number; failed: number }
@@ -60,7 +66,10 @@ export function App({ castFactory }: AppProps = {}) {
   const { t } = useI18n();
   const [key, setKey] = useState(() => localStorage.getItem(KEY_STORAGE) ?? "");
   const [keyRequired, setKeyRequired] = useState(false);
+  const [page, setPage] = useState<Page>(currentPage);
+  const [noteDrafts, setNoteDrafts] = useState<NoteDrafts>({ content: "", edit: null, createRequest: null });
   const [devices, setDevices] = useState<Device[]>([]);
+  const { orderedDevices, moveDevice, saveFailed: orderSaveFailed } = useDeviceOrder(devices);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [games, setGames] = useState<Game[]>([]);
@@ -79,6 +88,7 @@ export function App({ castFactory }: AppProps = {}) {
   const [controllerPending, setControllerPending] = useState(false);
   const [controllerFailed, setControllerFailed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const mainRef = useRef<HTMLElement | null>(null);
   const wsRef = useRef<{ close: () => void } | null>(null);
   /** Blocks a second click synchronously, before React re-renders the disabled switch. */
   const controllerPendingRef = useRef(false);
@@ -94,6 +104,20 @@ export function App({ castFactory }: AppProps = {}) {
   /** The latest customer app seen in front during the live view; CafeQuest itself never counts. */
   const resumeAppRef = useRef<ResumeApp | null>(null);
   const makeCastClient = castFactory ?? ((options: CastClientOptions) => new CastClient(options));
+
+  useEffect(() => {
+    const navigate = () => setPage(currentPage());
+    window.addEventListener("hashchange", navigate);
+    return () => window.removeEventListener("hashchange", navigate);
+  }, []);
+
+  useEffect(() => {
+    // Preserve the summary's existing #bay-* links when coming back from Notes.
+    const hash = window.location.hash;
+    const target = page === "headsets" && hash.startsWith("#bay-")
+      ? document.getElementById(hash.slice(1)) : mainRef.current;
+    target?.scrollIntoView?.({ block: "start" });
+  }, [page, keyRequired]);
 
   const applySnapshot = useCallback((snap: Snapshot) => {
     setDevices(snap.devices);
@@ -449,7 +473,11 @@ export function App({ castFactory }: AppProps = {}) {
     <>
       <header className="topbar">
         <h1 className="brand">CafeQuest</h1>
-        <BoardSummary devices={devices} now={now} serverOffsetMs={serverOffsetMs} />
+        <nav className="main-nav" aria-label={t.app.navigation}>
+          <a href="#/" aria-current={page === "headsets" ? "page" : undefined}>{t.app.headsets}</a>
+          <a href="#/notes" aria-current={page === "notes" ? "page" : undefined}>{t.notes.title}</a>
+        </nav>
+        <BoardSummary devices={orderedDevices} now={now} serverOffsetMs={serverOffsetMs} />
         <p className="feed" data-live={wsLive}>{wsLive ? t.app.live : t.app.connecting}</p>
         {controllerMonitoring && (
           <ControllerBatteryToggle
@@ -461,7 +489,7 @@ export function App({ castFactory }: AppProps = {}) {
         )}
         <LangToggle />
       </header>
-      <main className="shell">
+      <main className="shell" ref={mainRef}>
       {globalError != null && (
         <div className="banner" role="alert">
           <p>{friendlyError(globalError, t)}</p>
@@ -470,6 +498,7 @@ export function App({ castFactory }: AppProps = {}) {
           </button>
         </div>
       )}
+      {page === "headsets" && <>
       {devices.length > 0 && (
         <SelectionBar
           selectedCount={selectedIds.size}
@@ -478,10 +507,11 @@ export function App({ castFactory }: AppProps = {}) {
           onClear={() => setSelectedIds(new Set())}
         />
       )}
-      <section className="board" aria-label={t.app.headsets}>
-        {devices.map((d) => (
+      <DeviceBoard devices={orderedDevices} onMove={moveDevice} saveFailed={orderSaveFailed}>
+        {(d, reorderControls) => (
           <DeviceCard
             key={d.id}
+            reorderControls={reorderControls}
             device={d}
             games={games}
             now={now}
@@ -542,14 +572,18 @@ export function App({ castFactory }: AppProps = {}) {
               if (target) void startLiveView(target);
             }}
           />
-        ))}
-      </section>
+        )}
+      </DeviceBoard>
       {devices.length === 0 && globalError == null && (
         <section className="empty">
           <h2>{t.app.emptyTitle}</h2>
           <p>{t.app.emptyBody(<code>npm run simulator</code>)}</p>
         </section>
       )}
+      </>}
+      <div hidden={page !== "notes"}>
+        <NotesPage active={page === "notes"} apiKey={key} onUnauthorized={demandKey} drafts={noteDrafts} setDrafts={setNoteDrafts} />
+      </div>
       </main>
       <footer className="foot">
         <CatalogButton

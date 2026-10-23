@@ -1,5 +1,6 @@
 // Snapshot shapes served by GET /api/devices and /dashboard-ws state pushes.
 export type ExpectedGame = { gameId: string; name: string; launchedAt: string };
+export type Note = { id: string; content: string; revision: number; createdAt: string; updatedAt: string };
 /** endsAt is null while an unlimited session runs; a stopped one carries when play ended. */
 export type SessionInfo = { id: string; startedAt: string; endsAt: string | null; status: string };
 export type CommandInfo = { id: string; status: string; error: string | null };

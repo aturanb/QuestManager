@@ -23,6 +23,11 @@ import {
   sweepExpiredSessions,
   getControllerBatteryMonitoringEnabled,
   setControllerBatteryMonitoringEnabled,
+  listNotes,
+  getNote,
+  createNote,
+  updateNote,
+  deleteNote,
 } from "./store.js";
 import { ControllerBatteryCollector, defaultAdbRunner, type AdbRunner } from "./controller-battery.js";
 import { Hub, AGENT_WS_PATH, CAST_WS_PATH, DASHBOARD_WS_PATH } from "./hub.js";
@@ -297,6 +302,44 @@ export async function buildApp(cfg: AppConfig) {
     app.log.info({ enabled: body.data.enabled }, "controller battery monitoring changed");
     hub.pushDashboardState();
     return { controllerBatteryMonitoring: controllerBatteryCollector.monitoringState() };
+  });
+
+  // --- REST: shared notes (persisted independently of headset records) ---------
+  const noteContent = z.string().trim().min(1).max(5000);
+  const noteParams = z.object({ noteId: z.string().uuid() });
+  const noteRevision = z.number().int().positive().safe();
+
+  app.get("/api/notes", async () => ({ notes: listNotes(db) }));
+
+  app.post("/api/notes", async (req, reply) => {
+    const body = z.object({ content: noteContent, requestId: z.string().uuid().optional() }).strict().safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_note_body" });
+    // A browser retries the same id after a lost response. Never insert twice.
+    const existing = body.data.requestId ? getNote(db, body.data.requestId) : null;
+    if (existing) {
+      if (existing.content !== body.data.content) return reply.code(409).send({ error: "note_conflict" });
+      return { note: existing };
+    }
+    return reply.code(201).send({ note: createNote(db, body.data.content, body.data.requestId) });
+  });
+
+  app.put("/api/notes/:noteId", async (req, reply) => {
+    const params = noteParams.safeParse(req.params);
+    const body = z.object({ content: noteContent, revision: noteRevision }).strict().safeParse(req.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_note_body" });
+    const note = updateNote(db, params.data.noteId, body.data.content, body.data.revision);
+    if (note) return { note };
+    const exists = getNote(db, params.data.noteId);
+    return reply.code(exists ? 409 : 404).send({ error: exists ? "note_conflict" : "note_not_found" });
+  });
+
+  app.delete("/api/notes/:noteId", async (req, reply) => {
+    const params = noteParams.safeParse(req.params);
+    const body = z.object({ revision: noteRevision }).strict().safeParse(req.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_note_body" });
+    if (deleteNote(db, params.data.noteId, body.data.revision)) return { deleted: params.data.noteId };
+    const exists = getNote(db, params.data.noteId);
+    return reply.code(exists ? 409 : 404).send({ error: exists ? "note_conflict" : "note_not_found" });
   });
 
   // --- REST: devices (whole snapshot: serverTime, devices, monitoring state) ----

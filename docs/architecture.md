@@ -202,6 +202,32 @@ of `PORT`. `buildApp` starts the responder only when given `discoveryPort`
 (tests opt in with `0`); a busy port disables it with a warning and the server
 keeps running.
 
+## Shared admin notes
+
+`notes` stores plain-text café records independently of headset identities.
+`openDb` creates the table idempotently; each row has `id`, `content`, `revision`,
+`created_at`, and `updated_at`. Content is trimmed and limited to 1–5,000 characters.
+All SQL is in `store.ts`; all routes use the existing admin guard:
+
+- `GET /api/notes` returns `{notes}`, newest updates first.
+- `POST /api/notes {content, requestId?}` returns `{note}` with 201. The dashboard
+  retains a UUID request ID across retries; the ID becomes the note ID. Repeating
+  an accepted creation returns the existing note with 200; different content
+  under the same ID returns 409 rather than replacing it.
+- `PUT /api/notes/:noteId {content, revision}` updates only the matching revision.
+- `DELETE /api/notes/:noteId {revision}` removes only the matching revision.
+  Both return 409 on a newer revision and 404 if the note no longer exists.
+
+The dashboard has Headsets (`/#/`) and Notes (`/#/notes`) pages in its top
+navigation. Hash routing supports direct links, reloads, and browser back/forward
+without server routing changes; existing `#bay-*` summary links select Headsets.
+`NotesPage` stays mounted while navigating so pending saves keep their state. It
+loads on entry and offers explicit refresh. Notes
+do not travel in the one-second headset snapshots. Unsaved compose/edit drafts
+and pending creation IDs are held above the admin-key gate, retained through
+reauthentication and failed requests, and cleared after confirmed saves. They
+remain in browser memory until saved or the page is closed/refreshed.
+
 ## Language (EN / TR)
 
 The dashboard header and the headset app each have an EN | TR switch. The pick

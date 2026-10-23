@@ -1,4 +1,4 @@
-import type { ControllerBatteryMonitoringState, Device, Game, Snapshot } from "./types";
+import type { ControllerBatteryMonitoringState, Device, Game, Note, Snapshot } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -35,6 +35,33 @@ async function apiFetch(path: string, key: string, init?: RequestInit): Promise<
 
 export const getSnapshot = (key: string): Promise<Snapshot> => apiFetch("/api/devices", key);
 export const getGames = (key: string): Promise<{ games: Game[] }> => apiFetch("/api/games", key);
+
+export const getNotes = (key: string): Promise<{ notes: Note[] }> => apiFetch("/api/notes", key);
+
+/** getRandomValues also works on the café's HTTP LAN origin, unlike randomUUID. */
+export function newNoteRequestId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function createNote(key: string, content: string, requestId: string): Promise<{ note: Note }> {
+  return apiFetch("/api/notes", key, { method: "POST", body: JSON.stringify({ content, requestId }) });
+}
+
+export function updateNote(key: string, id: string, content: string, revision: number): Promise<{ note: Note }> {
+  return apiFetch(`/api/notes/${encodeURIComponent(id)}`, key, {
+    method: "PUT", body: JSON.stringify({ content, revision }),
+  });
+}
+
+export function deleteNote(key: string, id: string, revision: number): Promise<{ deleted: string }> {
+  return apiFetch(`/api/notes/${encodeURIComponent(id)}`, key, {
+    method: "DELETE", body: JSON.stringify({ revision }),
+  });
+}
 
 export type CatalogStatus = { entries: number; fetchedAt: string | null; source: string };
 

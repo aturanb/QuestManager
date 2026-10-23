@@ -86,6 +86,23 @@ older agents. Staff can add an optional mapping from the dashboard; it is
 stored in SQLite. An offline card offers **Remove headset** to clear stale
 headsets off the board.
 
+## Arrange headset cards
+
+Drag the six-dot handle at the top right of a headset card onto another card to
+change its position. The arrow buttons work by tap or click; with the handle
+focused, arrow keys also move the card earlier or later. The header summary
+follows the same order. Your arrangement is saved in this browser and survives
+reloads and live updates; new headsets appear at the end.
+
+## Shared café notes
+
+Open **Notes** in the top navigation to record game purchases, headset details,
+or reminders on its own page (`/#/notes`). Add, edit, search, and delete notes there; press **Add note** or
+**Save changes** to save. Notes are shared across admin browsers and stored in the
+server's SQLite database, so they survive browser refreshes and server restarts
+when using the same database. The page and navigation support English and Turkish;
+switching between **Headsets** and **Notes** keeps unsaved note drafts.
+
 ## Live support view
 
 Staff can watch one headset's screen while helping a customer: press **Request live

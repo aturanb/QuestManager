@@ -74,6 +74,13 @@ export function openDb(path: string): Db {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS device_apps (
       device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
       package_name TEXT NOT NULL,

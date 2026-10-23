@@ -255,6 +255,137 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("0 headsets selected")).toBeInTheDocument());
   });
 
+  describe("headset arrangement", () => {
+    const orderKey = "cq-headset-order";
+    const cardNames = () => within(screen.getByRole("region", { name: "Headsets" }))
+      .getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+    function dragCard(name: string, targetName: string) {
+      const handle = screen.getByRole("button", { name: `Drag to move ${name}` });
+      const target = screen.getByRole("heading", { name: targetName }).closest("article")!;
+      const dataTransfer = { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: "", dropEffect: "" };
+      fireEvent.dragStart(handle, { dataTransfer });
+      expect(fireEvent.dragEnter(target, { dataTransfer })).toBe(false);
+      fireEvent.dragOver(target, { dataTransfer });
+      fireEvent.drop(target, { dataTransfer });
+      fireEvent.dragEnd(handle, { dataTransfer });
+    }
+
+    it("drags a card without losing selection or its session-length draft", async () => {
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02"), device("d3", "Quest 03")]);
+      render(<App />, { wrapper: LangProvider });
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Select Quest 03" }));
+      const minutes = screen.getByRole("textbox", { name: "Custom session minutes for 1 selected headset" });
+      fireEvent.change(minutes, { target: { value: "77" } });
+
+      dragCard("Quest 03", "Quest 01");
+
+      expect(cardNames()).toEqual(["Quest 03", "Quest 01", "Quest 02"]);
+      expect(screen.getByRole("checkbox", { name: "Select Quest 03" })).toBeChecked();
+      expect(screen.getByRole("textbox", { name: "Custom session minutes for 1 selected headset" })).toHaveValue("77");
+      const pips = document.querySelectorAll(".pips a");
+      expect([...pips].map((pip) => pip.getAttribute("href"))).toEqual(["#bay-d3", "#bay-d1", "#bay-d2"]);
+    });
+
+    it("keeps the arrangement after reloading the dashboard", async () => {
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")]);
+      const view = render(<App />, { wrapper: LangProvider });
+      await screen.findByRole("heading", { name: "Quest 01" });
+      dragCard("Quest 01", "Quest 02");
+      view.unmount();
+      render(<App />, { wrapper: LangProvider });
+      await screen.findByRole("heading", { name: "Quest 01" });
+      expect(cardNames()).toEqual(["Quest 02", "Quest 01"]);
+    });
+
+    it("retains the saved order through live updates and appends new devices", async () => {
+      const first = device("d1", "Quest 01");
+      const second = device("d2", "Quest 02");
+      localStorage.setItem(orderKey, JSON.stringify(["d2", "d1"]));
+      const board = stubBoard([first, second]);
+      render(<App />, { wrapper: LangProvider });
+      await screen.findByRole("heading", { name: "Quest 01" });
+      expect(cardNames()).toEqual(["Quest 02", "Quest 01"]);
+      await waitFor(() => expect(board.socketReady()).toBe(true));
+      act(() => board.push([{ ...first, name: "Renamed", online: false }, second, device("d3", "Quest 03")]));
+      expect(cardNames()).toEqual(["Quest 02", "Renamed", "Quest 03"]);
+      act(() => board.push([first, device("d3", "Quest 03")]));
+      expect(cardNames()).toEqual(["Quest 01", "Quest 03"]);
+      act(() => board.push([first, second, device("d3", "Quest 03")]));
+      expect(cardNames()).toEqual(["Quest 02", "Quest 01", "Quest 03"]);
+    });
+
+    it("provides tap buttons and arrow keys with correct list boundaries", async () => {
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02"), device("d3", "Quest 03")]);
+      render(<App />, { wrapper: LangProvider });
+      const earlier = await screen.findByRole("button", { name: "Move Quest 01 earlier" });
+      expect(earlier).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Move Quest 03 later" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Move Quest 01 later" }));
+      expect(cardNames()).toEqual(["Quest 02", "Quest 01", "Quest 03"]);
+      const handle = screen.getByRole("button", { name: "Drag to move Quest 01" });
+      handle.focus();
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+      expect(cardNames()).toEqual(["Quest 02", "Quest 03", "Quest 01"]);
+      expect(handle).toHaveFocus();
+      fireEvent.keyDown(handle, { key: "ArrowUp" });
+      expect(cardNames()).toEqual(["Quest 02", "Quest 01", "Quest 03"]);
+      expect(screen.getByRole("status", { name: "Headset arrangement" })).toHaveTextContent("Quest 01 moved to position 2 of 3");
+    });
+
+    it.each(["broken json", "null", '{"d1":1}', '["d2",42]'])("ignores malformed saved ordering: %s", async (saved) => {
+      localStorage.setItem(orderKey, saved);
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")]);
+      render(<App />, { wrapper: LangProvider });
+      await screen.findByRole("heading", { name: "Quest 01" });
+      expect(cardNames()).toEqual(["Quest 01", "Quest 02"]);
+    });
+
+    it("ignores missing and duplicate saved IDs without duplicating cards", async () => {
+      localStorage.setItem(orderKey, '["missing","d2","d2","d1"]');
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02"), device("d3", "Quest 03")]);
+      render(<App />, { wrapper: LangProvider });
+      await screen.findByRole("heading", { name: "Quest 01" });
+      expect(cardNames()).toEqual(["Quest 02", "Quest 01", "Quest 03"]);
+    });
+
+    it("ignores outside drops and cancels a drag without saving a different order", async () => {
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")]);
+      render(<App />, { wrapper: LangProvider });
+      const target = (await screen.findByRole("heading", { name: "Quest 02" })).closest("article")!;
+      fireEvent.drop(target);
+      const handle = screen.getByRole("button", { name: "Drag to move Quest 01" });
+      fireEvent.dragStart(handle, { dataTransfer: { setData: vi.fn(), setDragImage: vi.fn() } });
+      fireEvent.dragOver(target);
+      fireEvent.dragEnd(handle);
+      fireEvent.drop(target);
+      expect(cardNames()).toEqual(["Quest 01", "Quest 02"]);
+      expect(localStorage.getItem(orderKey)).toBeNull();
+    });
+
+    it("keeps arranging usable and explains when browser storage cannot save", async () => {
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")]);
+      render(<App />, { wrapper: LangProvider });
+      await screen.findByRole("heading", { name: "Quest 01" });
+      const save = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+      try {
+        dragCard("Quest 01", "Quest 02");
+        expect(cardNames()).toEqual(["Quest 02", "Quest 01"]);
+        expect(screen.getByRole("alert")).toHaveTextContent("This browser couldn't save the arrangement");
+      } finally {
+        save.mockRestore();
+      }
+    });
+
+    it("provides Turkish arrangement controls and feedback", async () => {
+      localStorage.setItem(LANG_STORAGE, "tr");
+      stubBoard([device("d1", "Quest 01"), device("d2", "Quest 02")]);
+      render(<App />, { wrapper: LangProvider });
+      fireEvent.click(await screen.findByRole("button", { name: "Quest 02 için önceki sıraya taşı" }));
+      expect(screen.getByRole("button", { name: "Quest 02 için sürükleyerek taşı" })).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: "Gözlük sıralaması" })).toHaveTextContent("Quest 02: 2 gözlük içinde 1. sıraya taşındı");
+    });
+  });
+
   it("starts sessions on eligible selected headsets and reports the skipped cards", async () => {
     const active = {
       id: "session-2",

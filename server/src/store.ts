@@ -1,6 +1,6 @@
 import type { Db } from "./db.js";
 import { nowIso, uuid } from "./db.js";
-import type { DeviceRow, GameRow, SessionRow, CommandRow, DeviceAppRow } from "./types.js";
+import type { DeviceRow, GameRow, SessionRow, CommandRow, DeviceAppRow, NoteRow } from "./types.js";
 import type { InstalledApp } from "@cafequest/shared";
 
 export type NewDeviceInput = {
@@ -31,6 +31,36 @@ export function setControllerBatteryMonitoringEnabled(db: Db, enabled: boolean):
     `INSERT INTO app_settings (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   ).run(CONTROLLER_BATTERY_MONITORING_KEY, enabled ? "true" : "false");
+}
+
+// --- shared café notes ------------------------------------------------------
+
+const NOTE_COLUMNS = "id, content, revision, created_at AS createdAt, updated_at AS updatedAt";
+
+export function listNotes(db: Db): NoteRow[] {
+  return db.prepare(`SELECT ${NOTE_COLUMNS} FROM notes ORDER BY updated_at DESC, rowid DESC`).all() as NoteRow[];
+}
+
+export function getNote(db: Db, id: string): NoteRow | null {
+  return (db.prepare(`SELECT ${NOTE_COLUMNS} FROM notes WHERE id = ?`).get(id) as NoteRow | undefined) ?? null;
+}
+
+export function createNote(db: Db, content: string, id = uuid()): NoteRow {
+  const now = nowIso();
+  db.prepare("INSERT INTO notes (id, content, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, content, now, now);
+  return getNote(db, id)!;
+}
+
+/** Revision predicates make stale writes fail atomically, even across DB connections. */
+export function updateNote(db: Db, id: string, content: string, revision: number): NoteRow | null {
+  const result = db.prepare(
+    "UPDATE notes SET content = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND revision = ?"
+  ).run(content, nowIso(), id, revision);
+  return result.changes ? getNote(db, id) : null;
+}
+
+export function deleteNote(db: Db, id: string, revision: number): boolean {
+  return db.prepare("DELETE FROM notes WHERE id = ? AND revision = ?").run(id, revision).changes > 0;
 }
 
 // --- devices ---------------------------------------------------------------

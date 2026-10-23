@@ -1,5 +1,13 @@
 export type Db = import("better-sqlite3").Database;
 
+export type NoteRow = {
+  id: string;
+  content: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type DeviceRow = {
   id: string;
   name: string;

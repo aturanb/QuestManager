@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Device, DeviceControllerBattery, Game, InstalledApp } from "../types";
 import { bayState, type BayState } from "../bay";
 import { useI18n, type Messages } from "../i18n";
@@ -16,6 +16,7 @@ export type DeviceCardProps = {
   selected?: boolean;
   actionTargetCount?: number;
   actionResult?: string | null;
+  reorderControls?: ReactNode;
   /** True while this dashboard owns a live view; every card's live-view action is disabled. */
   castBusy?: boolean;
   onRequestCast?: (deviceId: string) => void;
@@ -385,6 +386,7 @@ export function DeviceCard(props: DeviceCardProps) {
             <span>{connection}</span>
           </p>
         </div>
+        {props.reorderControls}
       </header>
 
       <Readout state={state} now={now} serverOffsetMs={serverOffsetMs} />
