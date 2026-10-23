@@ -222,7 +222,7 @@ export async function buildApp(cfg: AppConfig) {
     socket.on("error", () => hub.removeDashboardSocket(socket));
   });
 
-  // --- live-view websocket: the single viewer bound to a reserved cast --------
+  // --- live-view websocket: the viewer bound to a reserved cast --------
   // Signaling only. The server never receives or stores media; one unguessable
   // session id plus the admin key authorizes exactly one viewer.
   app.get(CAST_WS_PATH, { websocket: true }, (socket: WebSocket, req) => {
@@ -524,7 +524,7 @@ export async function buildApp(cfg: AppConfig) {
   });
 
   // --- REST: live view sessions ---------------------------------------------------
-  // POST reserves the single global slot but does not contact the headset; the
+  // POST reserves the headset's live-view slot but does not contact the headset; the
   // agent is asked only once a viewer binds /cast-ws, which removes the race.
   app.post("/api/casts", async (req, reply) => {
     const body = z.object({ deviceId: z.string().uuid() }).safeParse(req.body);

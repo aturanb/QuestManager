@@ -1,4 +1,4 @@
-// Live-view route contract: admin-key enforcement, single global reservation,
+// Live-view route contract: admin-key enforcement, per-headset reservations,
 // direction-checked signaling relay, close codes, idempotent cleanup, and the
 // guarantee that no key, SDP, ICE, or media ever reaches logs or SQLite.
 import assert from "node:assert/strict";
@@ -128,7 +128,7 @@ test("device snapshot exposes supportsScreenCast only for a live capable connect
   oldAgent.close();
 });
 
-test("reservation rejects unknown, offline, and unsupported devices and enforces one global slot", async () => {
+test("reservation rejects unknown, offline, and unsupported devices and enforces one slot per headset", async () => {
   const unknown = await postCast(randomUUID());
   assert.equal(unknown.status, 404);
   assert.equal(((await unknown.json()) as any).error, "DEVICE_NOT_FOUND");
@@ -147,7 +147,7 @@ test("reservation rejects unknown, offline, and unsupported devices and enforces
   const busy = await postCast(agentId);
   assert.equal(busy.status, 409);
   assert.equal(((await busy.json()) as any).error, "CAST_BUSY");
-  assert.equal(hub.cast.active?.sessionId, firstBody.sessionId, "failed reservation leaves the active session untouched");
+  assert.equal(hub.cast.active[0]?.sessionId, firstBody.sessionId, "failed reservation leaves the active session untouched");
 
   assert.equal((await deleteCast(firstBody.sessionId)).status, 204);
   const second = await postCast(agentId);
@@ -179,7 +179,7 @@ test("cast websocket rejects unauthorized, unknown, and already-bound viewers wi
   assert.equal(first.readyState, WebSocket.OPEN);
 
   first.close();
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => hub.cast.active.length === 0);
   agent.close();
 });
 
@@ -219,13 +219,13 @@ test("binding the viewer sends one cast_request and relays offer/answer/ICE in b
 
   agent.send(JSON.stringify({ type: "cast_status", protocolVersion: 1, deviceId: agentId, sessionId, status: "live" }));
   await waitFor(() => viewerMessages.find((m) => m.type === "cast_status" && m.status === "live"));
-  assert.equal(hub.cast.active?.state, "live");
+  assert.equal(hub.cast.active[0]?.state, "live");
 
   // The browser tears down through DELETE; the headset gets cast_stop.
   assert.equal((await deleteCast(sessionId)).status, 204);
   const stop = await waitFor(() => agentMessages.find((m) => m.type === "cast_stop"));
   assert.equal(stop.reason, "viewer_stopped");
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => hub.cast.active.length === 0);
   agent.close();
 });
 
@@ -249,7 +249,7 @@ test("a cast frame from a replaced or foreign deviceId is rejected with DEVICE_M
   assert.ok(error);
   await wait(100);
   assert.equal(viewerMessages.length, before, "foreign signal must not reach the viewer");
-  assert.equal(hub.cast.active?.state, "negotiating");
+  assert.equal(hub.cast.active[0]?.state, "negotiating");
   await deleteCast(sessionId);
   agent.close();
   other.close();
@@ -275,7 +275,7 @@ test("cast websocket rejects binary, invalid JSON, viewer offers, and oversized 
     const closeCode = closed(viewer);
     send(viewer);
     assert.equal(await closeCode, 4400, `${name}: malformed frame code`);
-    await waitFor(() => hub.cast.active === null, 3000);
+    await waitFor(() => hub.cast.active.length === 0, 3000);
   }
   agent.close();
 });
@@ -294,12 +294,12 @@ test("viewer close, DELETE, agent close, and duplicate hello each release the sl
   let sessionId = await reserveFresh(agentId);
   let viewer = await openViewer(sessionId);
   viewer.close();
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => hub.cast.active.length === 0);
 
   // DELETE with no viewer, idempotent and reusable
   sessionId = await reserveFresh(agentId);
   assert.equal((await deleteCast(sessionId)).status, 204);
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => hub.cast.active.length === 0);
   assert.equal((await deleteCast(sessionId)).status, 204, "repeated delete stays idempotent");
   assert.equal((await deleteCast(randomUUID())).status, 204, "unknown session still answers 204");
   const invalid = await fetch(`${base}/api/casts/not-a-uuid`, { method: "DELETE", headers: auth });
@@ -311,7 +311,7 @@ test("viewer close, DELETE, agent close, and duplicate hello each release the sl
   viewer = await openViewer(sessionId);
   const viewerClosed = closed(viewer);
   agent.close();
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => hub.cast.active.length === 0);
   assert.equal(await viewerClosed, 1000, "viewer is closed cleanly when the agent disappears");
 
   // duplicate hello replaces the socket and terminates the bound session
@@ -320,7 +320,7 @@ test("viewer close, DELETE, agent close, and duplicate hello each release the sl
   viewer = await openViewer(sessionId);
   const replacedClosed = closed(viewer);
   const replacement = await connectAgent(agentId, ["screen_cast_v1"]);
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => hub.cast.active.length === 0);
   assert.equal(await replacedClosed, 1000);
   await deleteCast(await reserveFresh(agentId));
   replacement.close();
@@ -356,14 +356,58 @@ test("app close stops an active cast and frees the slot", async () => {
   const { sessionId } = (await reserved.json()) as any;
   const viewer = new WebSocket(`${sbase}/cast-ws?key=${ADMIN}&sessionId=${sessionId}`);
   await new Promise<void>((r, j) => { viewer.on("open", () => r()); viewer.on("error", j); });
-  assert.equal(second.hub.cast.active?.state, "awaiting_approval");
+  assert.equal(second.hub.cast.active[0]?.state, "awaiting_approval");
 
   await second.app.close();
-  assert.equal(second.hub.cast.active, null, "shutdown releases the global slot");
+  assert.deepEqual(second.hub.cast.active, [], "shutdown releases the global slot");
   await wait(100);
 });
 
-test("a live session blocks every other reservation and never relays a media frame", async () => {
+test("two agents and viewers relay concurrently without leaking signals or sharing cleanup", async (t) => {
+  const firstId = randomUUID();
+  const secondId = randomUUID();
+  const firstAgent = await connectAgent(firstId, ["screen_cast_v1"]);
+  const secondAgent = await connectAgent(secondId, ["screen_cast_v1"]);
+  const firstMessages = collect(firstAgent);
+  const secondMessages = collect(secondAgent);
+  const firstSession = await reserveFresh(firstId);
+  const secondSession = await reserveFresh(secondId);
+  const firstViewer = await openViewer(firstSession);
+  const secondViewer = await openViewer(secondSession);
+  t.after(async () => {
+    await deleteCast(firstSession);
+    await deleteCast(secondSession);
+    firstViewer.close();
+    secondViewer.close();
+    firstAgent.close();
+    secondAgent.close();
+  });
+  const firstVideo = collect(firstViewer);
+  const secondVideo = collect(secondViewer);
+  await waitFor(() => firstMessages.some((m) => m.type === "cast_request"));
+  await waitFor(() => secondMessages.some((m) => m.type === "cast_request"));
+  for (const [agent, deviceId, sessionId] of [[firstAgent, firstId, firstSession], [secondAgent, secondId, secondSession]] as const) {
+    agent.send(JSON.stringify({ type: "cast_status", protocolVersion: 1, deviceId, sessionId, status: "negotiating" }));
+    agent.send(JSON.stringify({ type: "cast_signal", protocolVersion: 1, deviceId, sessionId, signal: { kind: "offer", sdp: `offer-${deviceId}` } }));
+    agent.send(JSON.stringify({ type: "cast_status", protocolVersion: 1, deviceId, sessionId, status: "live" }));
+  }
+  await waitFor(() => firstVideo.some((m) => m.status === "live") && secondVideo.some((m) => m.status === "live"));
+  assert.deepEqual(firstVideo.filter((m) => m.type === "cast_signal").map((m) => m.signal.sdp), [`offer-${firstId}`]);
+  assert.deepEqual(secondVideo.filter((m) => m.type === "cast_signal").map((m) => m.signal.sdp), [`offer-${secondId}`]);
+  firstViewer.send(JSON.stringify({ type: "cast_signal", protocolVersion: 1, sessionId: secondSession, signal: { kind: "answer", sdp: "foreign-answer" } }));
+  secondViewer.send(JSON.stringify({ type: "cast_signal", protocolVersion: 1, sessionId: secondSession, signal: { kind: "answer", sdp: "second-answer" } }));
+  await waitFor(() => secondMessages.some((m) => m.signal?.sdp === "second-answer"));
+  assert.ok(!firstMessages.some((m) => m.signal?.sdp === "second-answer"));
+  assert.ok(!secondMessages.some((m) => m.signal?.sdp === "foreign-answer"));
+  await deleteCast(firstSession);
+  await waitFor(() => firstMessages.some((m) => m.type === "cast_stop"));
+  assert.equal(secondViewer.readyState, WebSocket.OPEN);
+  assert.ok(!secondMessages.some((m) => m.type === "cast_stop"));
+  secondAgent.send(JSON.stringify({ type: "cast_signal", protocolVersion: 1, deviceId: secondId, sessionId: secondSession, signal: { kind: "ice", candidate: "second-ice" } }));
+  await waitFor(() => secondVideo.some((m) => m.signal?.candidate === "second-ice"));
+});
+
+test("a live session blocks only the same headset and never relays a media frame", async () => {
   const agentId = randomUUID();
   const agent = await connectAgent(agentId, ["screen_cast_v1"]);
   const agentMessages = collect(agent);
@@ -379,18 +423,18 @@ test("a live session blocks every other reservation and never relays a media fra
   viewer.send(JSON.stringify({ type: "cast_signal", protocolVersion: 1, sessionId, signal: { kind: "answer", sdp: "v=0\r\nLIVE_ANSWER" } }));
   await waitFor(() => agentMessages.find((m) => m.type === "cast_signal" && m.signal?.kind === "answer"));
   agent.send(JSON.stringify({ type: "cast_status", protocolVersion: 1, deviceId: agentId, sessionId, status: "live" }));
-  await waitFor(() => hub.cast.active?.state === "live");
+  await waitFor(() => hub.cast.active[0]?.state === "live");
 
-  // One global slot: the same headset and a second capable headset are both refused.
+  // The same headset is busy; a different capable headset reserves independently.
   const sameDevice = await postCast(agentId);
   assert.equal(sameDevice.status, 409);
   assert.equal(((await sameDevice.json()) as any).error, "CAST_BUSY");
   const otherId = randomUUID();
   const otherAgent = await connectAgent(otherId, ["screen_cast_v1"]);
   const otherDevice = await postCast(otherId);
-  assert.equal(otherDevice.status, 409);
-  assert.equal(((await otherDevice.json()) as any).error, "CAST_BUSY");
-  assert.equal(hub.cast.active?.sessionId, sessionId, "the live session keeps its slot");
+  assert.equal(otherDevice.status, 201);
+  const { sessionId: otherSessionId } = (await otherDevice.json()) as any;
+  assert.equal(hub.cast.active[0]?.sessionId, sessionId, "the live session keeps its slot");
 
   // A binary frame is decoded as text, rejected as malformed, and relayed nowhere:
   // there is no media path into the server at all.
@@ -401,7 +445,7 @@ test("a live session blocks every other reservation and never relays a media fra
   assert.equal(malformed.code, "MALFORMED_MESSAGE");
   await wait(150);
   assert.equal(viewerMessages.length, beforeViewer, "no media frame reaches the viewer");
-  assert.equal(hub.cast.active?.state, "live");
+  assert.equal(hub.cast.active[0]?.state, "live");
   const rows = db.prepare("select count(*) as n from commands").get() as { n: number };
   assert.equal(rows.n, 0, "casting writes nothing to SQLite");
 
@@ -409,12 +453,14 @@ test("a live session blocks every other reservation and never relays a media fra
   assert.equal((await deleteCast(sessionId)).status, 204);
   const stop = await waitFor(() => agentMessages.find((m) => m.type === "cast_stop"));
   assert.equal(stop.reason, "viewer_stopped");
-  await waitFor(() => hub.cast.active === null);
+  await waitFor(() => !hub.cast.active.some((cast) => cast.sessionId === sessionId));
   const viewerClosed = new Promise<void>((resolve) => {
     if (viewer.readyState === WebSocket.CLOSED) return resolve();
     viewer.once("close", () => resolve());
   });
   await viewerClosed;
+  assert.equal((await postCast(otherId)).status, 409, "the other headset keeps its reservation");
+  await deleteCast(otherSessionId);
   const again = await postCast(otherId);
   assert.equal(again.status, 201, "a new reservation succeeds after stop");
   await deleteCast(((await again.json()) as any).sessionId);

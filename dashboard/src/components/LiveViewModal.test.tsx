@@ -313,7 +313,7 @@ describe("LiveViewModal", () => {
 
   it("never shows a raw platform error string", () => {
     render(<LiveViewModal {...props({ state: { phase: "failed", error: "CAST_BUSY" } })} />, { wrapper: LangProvider });
-    expect(screen.getByText("Another live view is already running. Stop it first.")).toBeInTheDocument();
+    expect(screen.getByText("This headset is already being viewed. Stop its current live view first.")).toBeInTheDocument();
     expect(screen.queryByText("CAST_BUSY")).not.toBeInTheDocument();
   });
 

@@ -10,7 +10,7 @@ Browser (dashboard :5173, React+Vite)
 Server :3000 (Fastify + better-sqlite3, server/src)
   │  app.ts       HTTP + WS routes, auth gate, hello handshake
   │  hub.ts       live sockets, command lifecycle, sweeps, snapshots
-  │  cast-coordinator.ts  one in-memory live-view session, timeouts, routing
+  │  cast-coordinator.ts  per-headset in-memory live-view sessions, timeouts, routing
   │  controller-battery.ts  optional ADB poll for Touch controller levels
   │  store.ts     all SQL (devices/games/device apps/sessions/commands)
   │  catalog.ts   local package-name to Meta App ID cache + verified fallbacks
@@ -82,12 +82,13 @@ and then send video directly over the café LAN.
 
 ## Live support view (`screen_cast_v1`)
 
-Staff can watch one headset's screen on the dashboard while they help a customer.
-It is deliberately small: **one stream at a time, one viewer, no audio, no
-recording**.
+Staff can watch multiple headsets at once in a responsive floating viewer dock.
+Each headset has **one session and one viewer, no audio, no recording**. Viewer
+controls and game-resume prompts belong to the selected headset; closing or
+retrying one view leaves all other views running.
 
-- **Reservation**: `POST /api/casts {deviceId}` fills the single global slot
-  (409 `CAST_BUSY` while any session is active, 409 `DEVICE_OFFLINE`/
+- **Reservation**: `POST /api/casts {deviceId}` reserves a slot for that headset
+  (409 `CAST_BUSY` while that same headset has a session, 409 `DEVICE_OFFLINE`/
   `agent_update_required` for a headset that is not connected or is too old to
   advertise the additive `screen_cast_v1` capability, 404 for an unknown
   device). The dashboard stores the returned `sessionId` in memory only.
@@ -96,8 +97,8 @@ recording**.
   same session is closed with 4409; unknown/expired sessions 4404, a bad id
   4400, a missing/wrong key 4401. The server relays `cast_request`,
   `cast_status`, `cast_signal` (offer/answer/ICE) and `cast_stop` and nothing
-  else: it rejects binary frames (4400) and never receives, decodes or stores
-  media or SDP.
+  else: it rejects binary frames (4400), never receives or decodes video, and
+  never persists or logs media, SDP, or ICE.
 - **Consent is per session**: Quest's own `MediaProjection` dialog is the only
   way to obtain a capture grant, and it must be approved again for every new
   request. The headset shows **Share screen with café staff** first; only that
@@ -111,8 +112,8 @@ recording**.
 - **Profile**: 960×540, 15 FPS, `maxBitrateBps` 1.5 Mbps, video only. The
   agent's `AndroidRtcPeer` sets the encoder limits on the sender; there is no
 audio track anywhere in the codebase.
-- **State**: `CastCoordinator` (`server/src/cast-coordinator.ts`) keeps the one
-  session in memory — reservation, viewer binding, approval/negotiation
+- **State**: `CastCoordinator` (`server/src/cast-coordinator.ts`) indexes sessions by session ID and headset
+  in memory — reservation, viewer binding, approval/negotiation
   timeouts, and the live state. Nothing about a cast is ever written to SQLite,
   files, or logs (the log lines carry only lifecycle words and ids).
 - **Cleanup is idempotent** and has one terminal path per cause: viewer closes
@@ -120,7 +121,15 @@ audio track anywhere in the codebase.
   negotiation timeout, the agent's socket dropping or being replaced by a
   newer hello, the headset's projection being revoked (system stop) or the
   person pressing **Stop sharing**, and server shutdown — each frees the slot
-  and, where a peer still exists, stops capture.
+  and, where a peer still exists, stops capture. Cleanup only touches the matching
+  session; server shutdown stops them all.
+- **Dashboard ownership**: `useLiveViews.ts` keeps a separate request/client and
+  customer-app history per headset. A closed or retried flow ignores late
+  callbacks and deletes late reservations. Auth loss, key replacement, or unmount
+  stops all locally owned views. Escape closes the focused viewer (or the newest
+  if focus is outside the dock); a game-resume prompt takes precedence.
+- **Compatibility**: multiple headset sessions reuse `screen_cast_v1`; the
+  existing casting-capable APK is unchanged. Update server and dashboard together.
 - **Failure is bounded**: statuses are `awaiting_approval | negotiating | live |
   stopped | failed`, and failures carry a stable code (`consent_denied`,
   `approval_timeout`, `negotiation_timeout`, `projection_stopped`,

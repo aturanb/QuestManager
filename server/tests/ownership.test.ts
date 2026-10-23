@@ -74,12 +74,12 @@ test("duplicate hello ends an active cast on the replaced socket and frees the s
 
   // A newer hello replaces the socket; the cast must terminate, not migrate.
   const replacement = await connectWithCaps(ID_A, "Quest A", ["screen_cast_v1"]);
-  assert.equal(hub.cast.active, null, "the replaced socket cannot keep a cast");
+  assert.deepEqual(hub.cast.active, [], "the replaced socket cannot keep a cast");
   assert.equal(viewer.closed.length, 1, "the bound viewer is closed exactly once");
   const again = hub.cast.reserve(ID_A);
   assert.equal(again.ok, true, "a new reservation succeeds on the replacement connection");
   if (again.ok) hub.cast.stop(again.sessionId);
-  assert.equal(hub.cast.active, null);
+  assert.deepEqual(hub.cast.active, []);
   replacement.close();
   capable.close();
   first.close();

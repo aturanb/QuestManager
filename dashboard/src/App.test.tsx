@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "./App";
 import type { CastClient, CastClientOptions } from "./casting";
 import { LANG_STORAGE, LangProvider } from "./i18n";
 import type { ControllerBatteryMonitoringState, Device, Game } from "./types";
+
+// Browser media playback is outside jsdom; retain the real viewer and its stream attachment.
+beforeAll(() => {
+  Object.defineProperty(HTMLMediaElement.prototype, "play", {
+    configurable: true, value: vi.fn().mockResolvedValue(undefined),
+  });
+});
 
 function device(id: string, name: string, over: Partial<Device> = {}): Device {
   return {
@@ -100,7 +107,7 @@ type FakeCastClient = {
 };
 
 /** Records the one client per reservation and lets a test drive its callbacks. */
-function fakeCastFactory() {
+function fakeCastFactory(finishClose?: (sessionId: string) => Promise<void>) {
   const clients: FakeCastClient[] = [];
   const factory = (options: CastClientOptions): CastClient => {
     const client = {
@@ -112,7 +119,7 @@ function fakeCastFactory() {
       },
       close() {
         (client as any).closed += 1;
-        return Promise.resolve();
+        return finishClose?.(options.sessionId) ?? Promise.resolve();
       },
     };
     clients.push(client as unknown as FakeCastClient);
@@ -125,18 +132,19 @@ function fakeCastFactory() {
  * A board whose reservation POST stays pending until the test resolves it, so
  * the connecting state and single-reservation rules can be observed.
  */
-function stubCastBoard(devices: Device[]) {
+function stubCastBoard(devices: Device[], beforeDelete?: () => Promise<void>) {
   const calls: { path: string; init?: RequestInit }[] = [];
-  let resolveCast: ((res: Response) => void) | null = null;
+  const reservations: { deviceId: string; resolve: (res: Response) => void }[] = [];
   const fetchMock = vi.fn((input: any, init?: RequestInit) => {
     const path = typeof input === "string" ? input : new URL(input.url).pathname;
     calls.push({ path, init });
     if (path === "/api/casts" && init?.method === "POST") {
       return new Promise<Response>((resolve) => {
-        resolveCast = resolve;
+        reservations.push({ deviceId: JSON.parse(String(init.body)).deviceId, resolve });
       });
     }
     if (path.startsWith("/api/casts/") && init?.method === "DELETE") {
+      if (beforeDelete) return beforeDelete().then(() => new Response(null, { status: 204 }));
       return Promise.resolve(new Response(null, { status: 204 }));
     }
     if (path.endsWith("/launch-installed") && init?.method === "POST") {
@@ -174,10 +182,10 @@ function stubCastBoard(devices: Device[]) {
         data: JSON.stringify({ type: "state", payload: { serverTime: new Date().toISOString(), devices: nextDevices } }),
       } as MessageEvent<string>),
     launchCalls: () => calls.filter((call) => call.path.endsWith("/launch-installed")),
-    resolveCast: (body: unknown, status = 201) => {
-      const resolve = resolveCast;
-      resolveCast = null;
-      resolve?.(new Response(JSON.stringify(body), { status }));
+    resolveCast: (body: unknown, status = 201, deviceId?: string) => {
+      const index = deviceId ? reservations.findIndex((request) => request.deviceId === deviceId) : 0;
+      const [request] = index < 0 ? [] : reservations.splice(index, 1);
+      request?.resolve(new Response(JSON.stringify(body), { status }));
     },
     castCalls: () => calls.filter((call) => call.path.startsWith("/api/casts")),
   };
@@ -658,13 +666,232 @@ describe("App", () => {
     await waitFor(() => expect(cast.clients).toHaveLength(1));
   });
 
+  describe("concurrent live views", () => {
+    const headsets = () => [
+      device("d1", "Quest 01", { supportsScreenCast: true }),
+      device("d2", "Quest 02", { supportsScreenCast: true }),
+    ];
+    const panel = (name: string) => screen.getByRole("complementary", { name: `Live view of ${name}` });
+
+    async function startBoth(devices = headsets(), cast = fakeCastFactory(), beforeDelete?: () => Promise<void>) {
+      const board = stubCastBoard(devices, beforeDelete);
+      const view = render(<App castFactory={cast.factory} />, { wrapper: LangProvider });
+      fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
+      fireEvent.click(screen.getByRole("button", { name: "Request live view of Quest 02" }));
+      return { board, cast, view };
+    }
+
+    it("keeps two pending reservations and streams separate when responses arrive in reverse order", async () => {
+      const { board, cast } = await startBoth();
+      expect(board.castCalls()).toHaveLength(2);
+      expect(within(panel("Quest 01")).getByText("Connecting…")).toBeInTheDocument();
+      expect(within(panel("Quest 02")).getByText("Connecting…")).toBeInTheDocument();
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s2", "s1"]);
+      const stream1 = { id: "headset-one" } as MediaStream;
+      const stream2 = { id: "headset-two" } as MediaStream;
+      act(() => {
+        cast.clients[0]!.options.callbacks.onState({ phase: "live" });
+        cast.clients[0]!.options.callbacks.onStream(stream2);
+        cast.clients[1]!.options.callbacks.onState({ phase: "live" });
+        cast.clients[1]!.options.callbacks.onStream(stream1);
+      });
+      expect(within(panel("Quest 01")).getByLabelText("Live screen of Quest 01")).toHaveProperty("srcObject", stream1);
+      expect(within(panel("Quest 02")).getByLabelText("Live screen of Quest 02")).toHaveProperty("srcObject", stream2);
+      fireEvent.click(screen.getByRole("button", { name: "Minimize the live view of Quest 01" }));
+      expect(within(panel("Quest 02")).getByLabelText("Live screen of Quest 02")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+      expect(cast.clients[1]!.closed).toBe(1);
+      expect(cast.clients[0]!.closed).toBe(0);
+      expect(panel("Quest 02")).toBeInTheDocument();
+    });
+
+    it("retries only the failed headset and ignores its previous client's late callbacks", async () => {
+      const { board, cast } = await startBoth();
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      const old = cast.clients[0]!;
+      act(() => {
+        old.options.callbacks.onState({ phase: "failed", error: "peer_disconnected" });
+        cast.clients[1]!.options.callbacks.onState({ phase: "live" });
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
+      await act(async () => board.resolveCast({ sessionId: "s3" }, 201, "d1"));
+      act(() => {
+        old.options.callbacks.onState({ phase: "live" });
+        old.options.callbacks.onUnauthorized();
+      });
+      expect(within(panel("Quest 01")).getByText("Connecting…")).toBeInTheDocument();
+      expect(within(panel("Quest 02")).getByText("Live")).toBeInTheDocument();
+      expect(cast.clients[1]!.closed).toBe(0);
+      expect(screen.queryByRole("dialog", { name: "Enter the admin key" })).not.toBeInTheDocument();
+    });
+
+    it("waits for a headset's previous client to finish closing before reserving its retry", async () => {
+      let finishClose!: () => void;
+      const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+      const cast = fakeCastFactory((sessionId) => sessionId === "s1" ? closing : Promise.resolve());
+      const { board } = await startBoth(headsets(), cast);
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      act(() => {
+        cast.clients[0]!.options.callbacks.onState({ phase: "failed", error: "peer_disconnected" });
+        cast.clients[1]!.options.callbacks.onState({ phase: "live" });
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
+      expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(2);
+      expect(within(panel("Quest 02")).getByText("Live")).toBeInTheDocument();
+      await act(async () => finishClose());
+      await waitFor(() => expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(3));
+      await act(async () => board.resolveCast({ sessionId: "s3" }, 201, "d1"));
+      expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s1", "s2", "s3"]);
+      expect(cast.clients[1]!.closed).toBe(0);
+    });
+
+    it("waits for a closed pending reservation to be deleted before reopening that headset", async () => {
+      let finishDelete!: () => void;
+      const deletion = new Promise<void>((resolve) => { finishDelete = resolve; });
+      const { board, cast } = await startBoth(headsets(), fakeCastFactory(), () => deletion);
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+      fireEvent.click(screen.getByRole("button", { name: "Request live view of Quest 01" }));
+      expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(2);
+      await act(async () => board.resolveCast({ sessionId: "old-one" }, 201, "d1"));
+      expect(board.castCalls().filter((call) => call.init?.method === "DELETE").map((call) => call.path)).toEqual(["/api/casts/old-one"]);
+      expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(2);
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s2"]);
+      await act(async () => finishDelete());
+      await waitFor(() => expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(3));
+      await act(async () => board.resolveCast({ sessionId: "s3" }, 201, "d1"));
+      expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s2", "s3"]);
+    });
+
+    it("closing a retry during cleanup prevents its deferred reservation from starting", async () => {
+      let finishClose!: () => void;
+      const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+      const cast = fakeCastFactory((sessionId) => sessionId === "s1" ? closing : Promise.resolve());
+      const { board } = await startBoth(headsets(), cast);
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      act(() => cast.clients[0]!.options.callbacks.onState({ phase: "failed", error: "peer_disconnected" }));
+      fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+      await act(async () => finishClose());
+      expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(2);
+      expect(screen.queryByRole("complementary", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+      expect(panel("Quest 02")).toBeInTheDocument();
+    });
+
+    it("cleans up a closed pending reservation without closing another view", async () => {
+      const { board, cast } = await startBoth();
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+      await act(async () => board.resolveCast({ sessionId: "late-one" }, 201, "d1"));
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      expect(board.castCalls().filter((call) => call.init?.method === "DELETE").map((call) => call.path)).toEqual(["/api/casts/late-one"]);
+      expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s2"]);
+      expect(panel("Quest 02")).toBeInTheDocument();
+    });
+
+    it("queues the correct customer-app prompts when both headset views end", async () => {
+      const devices = headsets().map((d, index) => ({
+        ...d,
+        foregroundApp: { packageName: `com.games.game${index + 1}`, name: `Game ${index + 1}`, startedAt: new Date().toISOString() },
+      }));
+      const { board } = await startBoth(devices);
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 02" }));
+      expect(screen.getByRole("alertdialog")).toHaveTextContent("Reopen Game 1 on Quest 01?");
+      fireEvent.click(screen.getByRole("button", { name: "Open Game 1 on Quest 01 again" }));
+      expect(screen.getByRole("alertdialog")).toHaveTextContent("Reopen Game 2 on Quest 02?");
+      fireEvent.click(screen.getByRole("button", { name: "Open Game 2 on Quest 02 again" }));
+      await waitFor(() => expect(board.launchCalls()).toHaveLength(2));
+      expect(board.launchCalls().map((call) => [call.path, JSON.parse(String(call.init?.body)).packageName])).toEqual([
+        ["/api/devices/d1/launch-installed", "com.games.game1"],
+        ["/api/devices/d2/launch-installed", "com.games.game2"],
+      ]);
+      await act(async () => {
+        board.resolveCast({ sessionId: "late-one" }, 201, "d1");
+        board.resolveCast({ sessionId: "late-two" }, 201, "d2");
+      });
+    });
+
+    it("Escape closes only the focused view", async () => {
+      await startBoth();
+      const button = screen.getByRole("button", { name: "Minimize the live view of Quest 01" });
+      button.focus();
+      fireEvent.keyDown(button, { key: "Escape" });
+      expect(screen.queryByRole("complementary", { name: "Live view of Quest 01" })).not.toBeInTheDocument();
+      expect(panel("Quest 02")).toBeInTheDocument();
+    });
+
+    it("auth failure closes every client and releases reservations that finish later", async () => {
+      const { board, cast } = await startBoth();
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      act(() => cast.last().options.callbacks.onUnauthorized());
+      expect(screen.getByRole("dialog", { name: "Enter the admin key" })).toBeInTheDocument();
+      expect(screen.queryAllByRole("complementary")).toHaveLength(0);
+      expect(cast.last().closed).toBe(1);
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      expect(board.castCalls().filter((call) => call.init?.method === "DELETE").map((call) => call.path)).toEqual(["/api/casts/s2"]);
+      expect(cast.clients).toHaveLength(1);
+    });
+
+    it("a reservation rejected for authorization ends the other live views too", async () => {
+      const { board, cast } = await startBoth();
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      await act(async () => board.resolveCast({ error: "unauthorized" }, 401, "d2"));
+      expect(screen.getByRole("dialog", { name: "Enter the admin key" })).toBeInTheDocument();
+      expect(cast.last().closed).toBe(1);
+      expect(screen.queryAllByRole("complementary")).toHaveLength(0);
+    });
+
+    it("Escape dismisses a game-resume prompt without ending another headset's view", async () => {
+      const devices = headsets();
+      devices[0]!.foregroundApp = { packageName: "com.fun.beat", name: "Beat Saber", startedAt: new Date().toISOString() };
+      await startBoth(devices);
+      fireEvent.click(screen.getByRole("button", { name: "Close the live view of Quest 01" }));
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(panel("Quest 02")).toBeInTheDocument();
+    });
+
+    it("Escape outside the dock ends only the newest view", async () => {
+      await startBoth();
+      (document.activeElement as HTMLElement)?.blur();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(panel("Quest 01")).toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: "Live view of Quest 02" })).not.toBeInTheDocument();
+    });
+
+    it("unmount releases both reservations when their responses arrive later", async () => {
+      const { board, cast, view } = await startBoth();
+      view.unmount();
+      await act(async () => {
+        board.resolveCast({ sessionId: "s1" }, 201, "d1");
+        board.resolveCast({ sessionId: "s2" }, 201, "d2");
+      });
+      expect(board.castCalls().filter((call) => call.init?.method === "DELETE").map((call) => call.path)).toEqual(["/api/casts/s1", "/api/casts/s2"]);
+      expect(cast.clients).toHaveLength(0);
+    });
+
+    it("unmount closes every active client", async () => {
+      const { board, cast, view } = await startBoth();
+      await act(async () => board.resolveCast({ sessionId: "s1" }, 201, "d1"));
+      await act(async () => board.resolveCast({ sessionId: "s2" }, 201, "d2"));
+      view.unmount();
+      expect(cast.clients.map((client) => client.closed)).toEqual([1, 1]);
+    });
+  });
+
   it("words a busy live view from the server", async () => {
     const board = stubCastBoard([device("d1", "Quest 01", { supportsScreenCast: true })]);
     render(<App castFactory={fakeCastFactory().factory} />, { wrapper: LangProvider });
 
     fireEvent.click(await screen.findByRole("button", { name: "Request live view of Quest 01" }));
     await act(async () => board.resolveCast({ error: "CAST_BUSY" }, 409));
-    expect(await screen.findByText("Another live view is already running. Stop it first.")).toBeInTheDocument();
+    expect(await screen.findByText("This headset is already being viewed. Stop its current live view first.")).toBeInTheDocument();
     expect(screen.queryByText("CAST_BUSY")).not.toBeInTheDocument();
   });
 
@@ -707,6 +934,7 @@ describe("App", () => {
     act(() => cast.last().options.callbacks.onState({ phase: "failed", error: "peer_disconnected" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
+    await waitFor(() => expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(2));
     await act(async () => board.resolveCast({ sessionId: "s2", status: "reserved" }));
     await waitFor(() => expect(cast.clients).toHaveLength(2));
     expect(cast.clients.map((client) => client.options.sessionId)).toEqual(["s1", "s2"]);
@@ -841,6 +1069,7 @@ describe("App", () => {
       act(() => cast.last().options.callbacks.onState({ phase: "failed", error: "peer_disconnected" }));
       fireEvent.click(screen.getByRole("button", { name: "Try the live view of Quest 01 again" }));
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      await waitFor(() => expect(board.castCalls().filter((call) => call.init?.method === "POST")).toHaveLength(2));
       await act(async () => board.resolveCast({ sessionId: "s2", status: "reserved" }));
       await waitFor(() => expect(cast.clients).toHaveLength(2));
       act(() => cast.last().options.callbacks.onState({ phase: "live" }));

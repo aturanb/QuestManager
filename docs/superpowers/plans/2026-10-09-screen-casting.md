@@ -1,5 +1,9 @@
 # One-Headset Live Support View Implementation Plan
 
+> Update (2026-10-23): the global single-stream restriction is superseded by
+> [multiple headset live views](../specs/2026-10-23-multi-device-casting-design.md).
+> This original document records the initial implementation.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let café staff request and view one low-bandwidth, video-only Quest headset stream in the CafeQuest dashboard after the wearer approves Quest's capture dialog.

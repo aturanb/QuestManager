@@ -26,22 +26,28 @@ export type LiveViewModalProps = {
   onStop: () => void;
   onRetry: () => void;
   onClose: () => void;
+  /** Only the last viewer handles Escape when focus is outside all panels. */
+  closeOnUnfocusedEscape?: boolean;
+  /** A queued resume prompt handles Escape before any viewer does. */
+  escapeEnabled?: boolean;
   /** Lets staff start an app while the stream runs, so the panel never needs minimizing. */
   launch?: LiveViewLaunch;
 };
 
 /**
- * The only cast viewer. It renders CastClient state and never touches WebRTC
+ * One cast viewer. It renders CastClient state and never touches WebRTC
  * directly; the remote MediaStream is attached to the <video> element and never
  * copied into application state.
  */
-export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onClose, launch }: LiveViewModalProps) {
+export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onClose, launch,
+  closeOnUnfocusedEscape = true, escapeEnabled = true }: LiveViewModalProps) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [noPicture, setNoPicture] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const contentId = useId();
 
   // Minimizing unmounts the <video>, so expanding must attach the stream to the new element.
@@ -81,14 +87,20 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
-  // Escape closes the viewer, which stops the stream in App. While full screen it only leaves full screen.
+  // Escape affects one viewer. Fullscreen and the game-resume prompt take precedence.
   useEffect(() => {
+    if (!escapeEnabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !document.fullscreenElement) onClose();
+      if (event.key !== "Escape" || event.defaultPrevented || document.fullscreenElement) return;
+      const focusedPanel = document.activeElement?.closest(".cast-panel");
+      if (focusedPanel ? focusedPanel === panelRef.current : closeOnUnfocusedEscape) {
+        event.preventDefault();
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, closeOnUnfocusedEscape, escapeEnabled]);
 
   const canFullscreen = document.fullscreenEnabled === true;
   function toggleFullscreen() {
@@ -120,7 +132,7 @@ export function LiveViewModal({ deviceName, state, stream, onStop, onRetry, onCl
             : castErrorText(state.error, t);
 
   return (
-      <aside className="cast-panel" aria-label={t.cast.modalTitle(deviceName)} data-minimized={minimized}>
+      <aside ref={panelRef} className="cast-panel" aria-label={t.cast.modalTitle(deviceName)} data-minimized={minimized}>
         <header className="cast-head">
           <div className="cast-title">
           <h2>{t.cast.modalTitle(deviceName)}</h2>
