@@ -1,4 +1,4 @@
-// One-session live-view coordinator contract: single global allocation,
+// Live-view coordinator contract: one allocation per headset,
 // direction-aware relay, deterministic timeouts, and idempotent cleanup.
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -40,13 +40,14 @@ function fakeTimers() {
 
 function fakeAgent() {
   let token: object | null = {};
+  const otherToken = {};
   let capable = true;
   const sent: { deviceId: string; frame: any }[] = [];
   const port = {
-    agentConnection: (deviceId: string) => (deviceId === DEVICE ? token : null),
-    supportsScreenCast: (deviceId: string) => deviceId === DEVICE && capable,
+    agentConnection: (deviceId: string) => deviceId === OTHER_DEVICE ? otherToken : deviceId === DEVICE ? token : null,
+    supportsScreenCast: (deviceId: string) => deviceId === OTHER_DEVICE || (deviceId === DEVICE && capable),
     sendCastFrame: (deviceId: string, frame: any) => {
-      if (deviceId !== DEVICE || token === null) return false;
+      if (deviceId !== OTHER_DEVICE && (deviceId !== DEVICE || token === null)) return false;
       sent.push({ deviceId, frame });
       return true;
     },
@@ -143,7 +144,7 @@ test("default timeouts match the approved bind, approval, and negotiation window
   assert.equal(CAST_NEGOTIATION_MS, 20_000);
 });
 
-test("reserves only an online capable device and rejects a second global session", () => {
+test("reserves only online capable devices and rejects a second session for the same headset", () => {
   const env = make();
   env.agent.setConnected(false);
   assert.deepEqual(env.coordinator.reserve(DEVICE), { ok: false, error: "DEVICE_OFFLINE" });
@@ -155,11 +156,72 @@ test("reserves only an online capable device and rejects a second global session
   assert.equal(first.ok, true);
   if (first.ok) {
     assert.equal(first.status, "reserved");
-    assert.equal(env.coordinator.active?.state, "reserved");
+    assert.equal(env.coordinator.active[0]?.state, "reserved");
   }
   assert.deepEqual(env.coordinator.reserve(DEVICE), { ok: false, error: "CAST_BUSY" });
-  // The slot is global: a second device is refused while any session exists.
-  assert.deepEqual(env.coordinator.reserve(OTHER_DEVICE), { ok: false, error: "CAST_BUSY" });
+  assert.equal(env.coordinator.reserve(OTHER_DEVICE).ok, true, "another headset has its own slot");
+});
+
+test("concurrent casts isolate signaling, viewer ownership, disconnects, and retries", () => {
+  const env = make();
+  const first = startNegotiating(env);
+  const second = env.coordinator.reserve(OTHER_DEVICE);
+  assert.equal(second.ok, true, "a different headset can cast concurrently");
+  if (!second.ok) return;
+  const viewer = fakeViewer();
+  assert.deepEqual(env.coordinator.bindViewer(second.sessionId, viewer), { ok: true });
+  const token = env.agent.port.agentConnection(OTHER_DEVICE)!;
+  env.coordinator.handleAgentStatus(OTHER_DEVICE, token, statusFrame(second.sessionId, "negotiating"));
+  env.coordinator.handleAgentStatus(OTHER_DEVICE, token, statusFrame(second.sessionId, "live"));
+  const firstCount = first.viewer.messages.length;
+  env.coordinator.handleAgentSignal(OTHER_DEVICE, token, agentSignal(second.sessionId, { kind: "offer", sdp: "second-offer" }));
+  assert.equal(viewer.messages.at(-1)?.signal?.sdp, "second-offer");
+  assert.equal(first.viewer.messages.length, firstCount, "only the second viewer receives its offer");
+  const sent = env.agent.sent.length;
+  env.coordinator.handleViewerSignal(first.viewer, viewerSignal(second.sessionId, { kind: "answer", sdp: "foreign" }));
+  env.coordinator.handleAgentSignal(DEVICE, env.agent.token()!, agentSignal(second.sessionId, { kind: "offer", sdp: "foreign" }));
+  assert.equal(env.agent.sent.length, sent);
+  assert.equal(viewer.messages.at(-1)?.signal?.sdp, "second-offer");
+  env.coordinator.handleViewerSignal(viewer, viewerSignal(second.sessionId, { kind: "answer", sdp: "second-answer" }));
+  assert.equal(env.agent.sent.at(-1)?.deviceId, OTHER_DEVICE);
+  assert.equal(env.agent.sent.at(-1)?.frame.signal.sdp, "second-answer");
+  assert.equal(env.coordinator.stop(second.sessionId, first.viewer), false, "a different viewer cannot stop it");
+  env.agent.replaceConnection();
+  env.coordinator.agentDisconnected(DEVICE);
+  assert.equal(first.viewer.closes.length, 1);
+  assert.equal(viewer.closes.length, 0, "disconnecting the first headset leaves the second running");
+  const retry = startNegotiating(env);
+  env.coordinator.stop(first.sessionId, first.viewer);
+  assert.equal(retry.viewer.closes.length, 0, "a stale close cannot end the new session");
+  env.coordinator.stop(retry.sessionId);
+  assert.equal(viewer.closes.length, 0, "stopping the retry leaves the other headset running");
+  env.coordinator.stop(second.sessionId, viewer);
+  assert.equal(viewer.closes.length, 1);
+  assert.deepEqual(env.timers.pending(), []);
+});
+
+test("a session timeout leaves another cast live and shutdown stops every remaining cast", () => {
+  const env = make();
+  const first = startNegotiating(env);
+  env.coordinator.handleAgentStatus(DEVICE, env.agent.token()!, statusFrame(first.sessionId, "live"));
+  const second = env.coordinator.reserve(OTHER_DEVICE);
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+  const [timer] = env.timers.pending();
+  env.timers.run(timer!);
+  assert.equal(first.viewer.closes.length, 0, "another reservation expiring leaves the live cast alone");
+  const next = env.coordinator.reserve(OTHER_DEVICE);
+  assert.equal(next.ok, true);
+  if (!next.ok) return;
+  const viewer = fakeViewer();
+  env.coordinator.bindViewer(next.sessionId, viewer);
+  env.coordinator.stopAll();
+  env.coordinator.stopAll();
+  assert.equal(first.viewer.closes.length, 1);
+  assert.equal(viewer.closes.length, 1);
+  assert.deepEqual(env.agent.sent.filter(({ frame }) => frame.type === "cast_stop").map(({ deviceId }) => deviceId).sort(),
+    [DEVICE, OTHER_DEVICE].sort());
+  assert.deepEqual(env.timers.pending(), []);
 });
 
 test("binding the first viewer sends cast_request and starts the approval timeout", () => {
@@ -181,7 +243,7 @@ test("binding the first viewer sends cast_request and starts the approval timeou
     env.timers.pending().map((t) => t.ms),
     [20],
   );
-  assert.equal(env.coordinator.active?.state, "awaiting_approval");
+  assert.equal(env.coordinator.active[0]?.state, "awaiting_approval");
   assert.equal(viewer.messages.at(-1)?.status, "awaiting_approval");
   // A second bind for the same reservation is refused and does not disturb it.
   assert.deepEqual(env.coordinator.bindViewer(reserved.sessionId, fakeViewer()), {
@@ -209,7 +271,7 @@ test("approval status starts the negotiation timeout and live cancels it", () =>
   );
 
   env.coordinator.handleAgentStatus(DEVICE, env.agent.token()!, statusFrame(reserved.sessionId, "negotiating"));
-  assert.equal(env.coordinator.active?.state, "negotiating");
+  assert.equal(env.coordinator.active[0]?.state, "negotiating");
   assert.deepEqual(
     env.timers.pending().map((t) => t.ms),
     [30],
@@ -217,9 +279,9 @@ test("approval status starts the negotiation timeout and live cancels it", () =>
   assert.equal(viewer.messages.at(-1)?.status, "negotiating");
 
   // Live moves the session out of negotiation and cancels the timer.
-  assert.equal(env.coordinator.active?.state, "negotiating");
+  assert.equal(env.coordinator.active[0]?.state, "negotiating");
   env.coordinator.handleAgentStatus(DEVICE, env.agent.token()!, statusFrame(reserved.sessionId, "live"));
-  assert.equal(env.coordinator.active?.state, "live");
+  assert.equal(env.coordinator.active[0]?.state, "live");
   assert.deepEqual(env.timers.pending(), []);
   assert.equal(viewer.messages.at(-1)?.status, "live");
 });
@@ -261,7 +323,7 @@ test("foreign and late signals never relay", () => {
   env.coordinator.handleViewerSignal(viewer, viewerSignal(sessionId, { kind: "answer", sdp: "late" }));
   assert.equal(env.agent.sent.length, agentCount + 1, "only the correctly addressed answer reaches the agent");
 
-  assert.equal(env.coordinator.active?.state, "negotiating");
+  assert.equal(env.coordinator.active[0]?.state, "negotiating");
   env.coordinator.stop(sessionId, viewer, "viewer_stopped");
   const frozenViewer = viewer.messages.length;
   const frozenAgent = env.agent.sent.length;
@@ -270,7 +332,7 @@ test("foreign and late signals never relay", () => {
   env.coordinator.handleAgentStatus(DEVICE, env.agent.token()!, statusFrame(sessionId, "live"));
   assert.equal(viewer.messages.length, frozenViewer + 0, "late frames reach nothing");
   assert.equal(env.agent.sent.length, frozenAgent);
-  assert.equal(env.coordinator.active, null);
+  assert.deepEqual(env.coordinator.active, []);
   void viewerCount;
 });
 
@@ -301,7 +363,7 @@ test("viewer close, agent disconnect, explicit stop and stopAll clean up once an
     const env = make();
     const { sessionId, viewer } = startNegotiating(env);
     act(env, sessionId, viewer);
-    assert.equal(env.coordinator.active, null, `${name}: slot released`);
+    assert.deepEqual(env.coordinator.active, [], `${name}: slot released`);
     assert.equal(viewer.closes.length, 1, `${name}: viewer closed exactly once`);
     assert.deepEqual(env.timers.pending(), [], `${name}: no timer left`);
 
@@ -324,7 +386,7 @@ test("agent replacement terminates rather than migrates the session", () => {
   const newToken = env.agent.replaceConnection();
   env.coordinator.agentDisconnected(DEVICE);
 
-  assert.equal(env.coordinator.active, null);
+  assert.deepEqual(env.coordinator.active, []);
   assert.equal(viewer.closes.length, 1);
   assert.equal(viewer.messages.at(-1)?.status, "failed");
   assert.equal(viewer.messages.at(-1)?.error, "peer_disconnected");
@@ -349,7 +411,7 @@ test("bind, approval and negotiation timeouts use their exact failure codes", ()
   const [bindTimer] = bindEnv.timers.pending();
   assert.equal(bindTimer!.ms, 10);
   bindEnv.timers.run(bindTimer!);
-  assert.equal(bindEnv.coordinator.active, null);
+  assert.deepEqual(bindEnv.coordinator.active, []);
   assert.equal(bindEnv.agent.sent.length, 0, "no headset request before a viewer bound");
 
   // Approval timeout.
@@ -360,7 +422,7 @@ test("bind, approval and negotiation timeouts use their exact failure codes", ()
   approvalEnv.coordinator.bindViewer(approval.sessionId, approvalViewer);
   const [approvalTimer] = approvalEnv.timers.pending();
   approvalEnv.timers.run(approvalTimer!);
-  assert.equal(approvalEnv.coordinator.active, null);
+  assert.deepEqual(approvalEnv.coordinator.active, []);
   const stop = approvalEnv.agent.sent.at(-1)!.frame;
   assert.equal(stop.type, "cast_stop");
   assert.equal(stop.reason, "approval_timeout");
@@ -374,7 +436,7 @@ test("bind, approval and negotiation timeouts use their exact failure codes", ()
   const [negotiationTimer] = negotiationEnv.timers.pending();
   assert.equal(negotiationTimer!.ms, 30);
   negotiationEnv.timers.run(negotiationTimer!);
-  assert.equal(negotiationEnv.coordinator.active, null);
+  assert.deepEqual(negotiationEnv.coordinator.active, []);
   assert.equal(negotiationEnv.agent.sent.at(-1)!.frame.reason, "negotiation_timeout");
   assert.equal(viewer.messages.at(-1)?.error, "negotiation_timeout");
   assert.equal(viewer.closes.length, 1);
@@ -386,7 +448,7 @@ test("terminal agent status reaches the viewer before closure", () => {
   const { sessionId, viewer } = startNegotiating(env);
   env.coordinator.handleAgentStatus(DEVICE, env.agent.token()!, statusFrame(sessionId, "failed", "projection_stopped"));
 
-  assert.equal(env.coordinator.active, null, "a failed session frees the slot");
+  assert.deepEqual(env.coordinator.active, [], "a failed session frees the slot");
   const final = viewer.messages.at(-1);
   assert.equal(final.status, "failed");
   assert.equal(final.error, "projection_stopped");
@@ -401,7 +463,7 @@ test("terminal agent status reaches the viewer before closure", () => {
   const started = startNegotiating(clean);
   clean.coordinator.handleAgentStatus(DEVICE, clean.agent.token()!, statusFrame(started.sessionId, "stopped"));
   assert.equal(started.viewer.messages.at(-1)?.status, "stopped");
-  assert.equal(clean.coordinator.active, null);
+  assert.deepEqual(clean.coordinator.active, []);
 });
 
 test("consent denial fails the session with a bounded code", () => {
@@ -417,7 +479,7 @@ test("consent denial fails the session with a bounded code", () => {
     statusFrame(reserved.sessionId, "failed", "consent_denied"),
   );
   assert.equal(awaitingViewer.messages.at(-1)?.error, "consent_denied");
-  assert.equal(awaiting.coordinator.active, null);
+  assert.deepEqual(awaiting.coordinator.active, []);
 });
 
 test("SDP and ICE values are absent from logger calls", () => {

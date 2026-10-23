@@ -105,20 +105,26 @@ switching between **Headsets** and **Notes** keeps unsaved note drafts.
 
 ## Live support view
 
-Staff can watch one headset's screen while helping a customer: press **Request live
+Staff can watch several headsets at once while helping customers: press **Request live
 view** on a card and the headset shows **Share screen with café staff**, which
 opens Quest's own per-session screen-sharing consent. Approving starts a live
-view in a dashboard modal (**Stop live view** ends it, as does the headset's
+view in a floating dashboard panel (**Stop live view** ends it, as does the headset's
 **Stop sharing**).
 
-It is deliberately narrow: one stream at a time, one viewer, video only (no
-audio, recording, or screenshots), and the video travels directly between the
+Each headset has one stream and one viewer. Multiple headset views share a
+scrollable dock, with separate minimize, fullscreen, retry, and stop controls.
+Stopping one view leaves the others running; game-reopen prompts are shown one
+at a time for the correct headset. Streaming remains video only (no audio,
+recording, or screenshots), and the video travels directly between the
 headset and the browser over the café LAN — WebRTC with no STUN/TURN/SFU and no
 cloud service. The server only relays session setup (offer/answer/ICE) and keeps
 nothing: no SDP, ICE, or media ever reaches SQLite, files, or logs. Quest's
 consent dialog is required for every session and Developer Mode does not bypass
 it, so a headset is never watchable without someone approving on it. Both
-devices must be on the same subnet. Details in
+devices must be on the same subnet. The existing casting-capable APK needs no
+update for multiple headset views; deploy the updated server and dashboard
+together. Test simultaneous playback on café hardware to establish Wi-Fi and
+browser capacity. Details in
 [docs/architecture.md](docs/architecture.md#live-support-view-screen_cast_v1).
 
 ## Controller batteries (optional)

@@ -127,7 +127,7 @@ export function renameDevice(key: string, deviceId: string, name: string): Promi
   });
 }
 
-/** Reserves the single global live-view slot for one headset. */
+/** Reserves the selected headset's live-view slot. */
 export function requestCast(key: string, deviceId: string): Promise<{ sessionId: string; status: string }> {
   return apiFetch("/api/casts", key, { method: "POST", body: JSON.stringify({ deviceId }) });
 }

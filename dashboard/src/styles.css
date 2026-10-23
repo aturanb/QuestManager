@@ -475,6 +475,38 @@ input::placeholder { color: var(--chalk-dim); }
 .confirm .btn { flex: 1 1 0; }
 
 /* ---- live view -------------------------------------------------------------- */
+.cast-views {
+  position: fixed;
+  right: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 20;
+  display: grid;
+  align-items: start;
+  gap: 14px;
+  width: min(880px, calc(100vw - 2 * var(--gutter)));
+  max-height: calc(100dvh - 2 * var(--gutter));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+.cast-views[data-multiple="true"] {
+  width: min(1180px, calc(100vw - 2 * var(--gutter)));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.cast-views > .cast-panel {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-height: none;
+  pointer-events: auto;
+}
+.cast-views:not([data-multiple="true"]) > .cast-panel[data-minimized="true"] {
+  width: min(440px, 100%);
+  justify-self: end;
+}
+@media (max-width: 900px) {
+  .cast-views[data-multiple="true"] { grid-template-columns: minmax(0, 1fr); }
+}
 .cast-panel {
   position: fixed;
   right: var(--gutter);

@@ -63,7 +63,7 @@ connect**.
 
 ## Live support view (screen_cast_v1)
 
-Needs a managed game in the foreground, one headset, and the dashboard open on
+Needs managed games in the foreground, two headsets for the concurrent-view row, and the dashboard open on
 the café PC. Use a stopwatch for the timed rows and record real numbers in
 `docs/poc-test-results.md`.
 
@@ -83,7 +83,7 @@ the café PC. Use a stopwatch for the timed rows and record real numbers in
 | 31 | Timing: request a view and tap nothing for ~60 s → the dashboard/headset report the request timing out, the headset shows no share panel, and a fresh request asks for consent again | |
 | 32 | Game capture compatibility: repeat 21–25 with a second and third game (and a 2D panel app). Note any title that shows black (`FLAG_SECURE`) | |
 | 33 | Fresh consent every time: after one completed session, request again → Quest's dialog appears again; a cached/instant start would be a FAIL | |
-| 34 | One stream only: with a session Live, press **Request live view** on another Online headset → refused with `busy`; press it again on the same card → also refused | |
+| 34 | With one view Live, request another Online headset and approve there → both views play. Stop/retry/minimize one → the other continues. A second tab requesting the same busy headset gets `CAST_BUSY`. Stop both → reopen prompts target the correct headset/game | |
 | 35 | Sleep test: let the headset sleep mid-session → the session ends and the dashboard frees the slot (no ghost viewer) | |
 | 36 | Wi-Fi loss: aircraft-mode the headset mid-session → session ends, card goes Offline, slot is free; restoring Wi-Fi lets a new request succeed | |
 | 37 | Viewer refresh: reload the dashboard mid-session → the session ends server-side (no orphan projection; the headset stops sharing) | |
@@ -132,7 +132,7 @@ TCP ADB was prepared over USB (`adb tcpip 5555`, see docs/quest-setup.md).
   on different subnets/VPN, or the access point blocks peer traffic. The media
   path has no TURN relay by design (see docs/known-limitations.md).
 - **Live view is black**: the running app sets `FLAG_SECURE` and refuses capture.
-- **`Request live view` refused**: another session is already Live (`busy`), the
+- **`Request live view` refused**: that headset is already being viewed (`busy`), the
   headset is Offline, or the APK is older than 0.5.0 and does not advertise
   `screen_cast_v1`.
 - **Controller badges missing**: the switch is off, or the headset has no

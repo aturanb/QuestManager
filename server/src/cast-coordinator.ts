@@ -99,13 +99,14 @@ const defaultTimers: CastTimerScheduler = {
 };
 
 /**
- * Owns the single in-memory live-view session. It relays bounded status and
- * WebRTC signaling between one agent and one browser viewer and never stores
- * SDP, ICE, or media. Terminal cleanup is idempotent and releases the global
- * slot exactly once.
+ * Owns independent in-memory live-view sessions, at most one per headset.
+ * Each relays bounded status and WebRTC signaling between its agent and viewer.
+ * SDP, ICE, and media are never stored. Terminal cleanup releases only that
+ * session's device slot and is idempotent.
  */
 export class CastCoordinator {
-  private activeCast: ActiveCast | null = null;
+  private readonly casts = new Map<string, ActiveCast>();
+  private readonly deviceSessions = new Map<string, string>();
   private readonly agent: CastAgentPort;
   private readonly log: CastLog;
   private readonly now: () => number;
@@ -127,13 +128,12 @@ export class CastCoordinator {
   }
 
   /** Read-only view used by tests and diagnostics; never contains signaling data. */
-  get active(): ActiveCastInfo | null {
-    const cast = this.activeCast;
-    return cast ? { sessionId: cast.sessionId, deviceId: cast.deviceId, state: cast.state } : null;
+  get active(): ActiveCastInfo[] {
+    return [...this.casts.values()].map(({ sessionId, deviceId, state }) => ({ sessionId, deviceId, state }));
   }
 
   reserve(deviceId: string): ReserveResult {
-    if (this.activeCast) return { ok: false, error: "CAST_BUSY" };
+    if (this.deviceSessions.has(deviceId)) return { ok: false, error: "CAST_BUSY" };
     const token = this.agent.agentConnection(deviceId);
     if (!token) return { ok: false, error: "DEVICE_OFFLINE" };
     if (!this.agent.supportsScreenCast(deviceId)) return { ok: false, error: "CAST_UNSUPPORTED" };
@@ -149,7 +149,8 @@ export class CastCoordinator {
       approvalTimer: null,
       negotiationTimer: null,
     };
-    this.activeCast = cast;
+    this.casts.set(sessionId, cast);
+    this.deviceSessions.set(deviceId, sessionId);
     cast.bindTimer = this.timers.set(() => this.expireBind(sessionId), this.bindTimeoutMs);
     this.log.info({ device: deviceId, sessionId, state: cast.state }, "live view reserved");
     return { ok: true, sessionId, status: "reserved" };
@@ -161,8 +162,8 @@ export class CastCoordinator {
    * offer before a viewer existed.
    */
   bindViewer(sessionId: string, viewer: CastViewer): BindResult {
-    const cast = this.activeCast;
-    if (!cast || cast.sessionId !== sessionId) return { ok: false, error: "CAST_SESSION_NOT_FOUND" };
+    const cast = this.casts.get(sessionId);
+    if (!cast) return { ok: false, error: "CAST_SESSION_NOT_FOUND" };
     if (cast.state !== "reserved" || cast.viewer) return { ok: false, error: "CAST_SESSION_ALREADY_BOUND" };
     const token = this.agent.agentConnection(cast.deviceId);
     if (!token || token !== cast.agentToken) {
@@ -274,8 +275,8 @@ export class CastCoordinator {
 
   /** Viewer answer/ICE → bound agent only. */
   handleViewerSignal(viewer: CastViewer, message: ViewerCastSignal): void {
-    const cast = this.activeCast;
-    if (!cast || cast.viewer !== viewer || cast.sessionId !== message.sessionId) {
+    const cast = this.casts.get(message.sessionId);
+    if (!cast || cast.viewer !== viewer) {
       this.log.debug({ sessionId: message.sessionId }, "ignored foreign or late viewer signal");
       return;
     }
@@ -299,8 +300,8 @@ export class CastCoordinator {
    * closing viewer must match the bound one; any other socket cannot stop it.
    */
   stop(sessionId: string, viewer?: CastViewer, reason: CastStopReason = "viewer_stopped"): boolean {
-    const cast = this.activeCast;
-    if (!cast || cast.sessionId !== sessionId) return false;
+    const cast = this.casts.get(sessionId);
+    if (!cast) return false;
     if (viewer && cast.viewer !== viewer) return false;
     this.terminate(cast, { reason, sendStop: true, viewerStatus: "stopped" });
     return true;
@@ -308,22 +309,23 @@ export class CastCoordinator {
 
   /** Agent socket closed or was replaced: the session must never migrate. */
   agentDisconnected(deviceId: string): void {
-    const cast = this.activeCast;
-    if (!cast || cast.deviceId !== deviceId) return;
+    const sessionId = this.deviceSessions.get(deviceId);
+    const cast = sessionId ? this.casts.get(sessionId) : undefined;
+    if (!cast) return;
     this.terminate(cast, { reason: "agent_disconnected", failure: "peer_disconnected", viewerStatus: "failed" });
   }
 
   /** Server shutdown: stop the agent capture first, then release the viewer. */
   stopAll(): void {
-    const cast = this.activeCast;
-    if (!cast) return;
-    this.terminate(cast, { reason: "server_stopping", sendStop: true, viewerStatus: "stopped" });
+    for (const cast of [...this.casts.values()]) {
+      this.terminate(cast, { reason: "server_stopping", sendStop: true, viewerStatus: "stopped" });
+    }
   }
 
   private currentCast(deviceId: string, connection: object, sessionId: string): ActiveCast | null {
-    const cast = this.activeCast;
+    const cast = this.casts.get(sessionId);
     if (!cast) return null;
-    if (cast.deviceId !== deviceId || cast.sessionId !== sessionId || cast.agentToken !== connection) {
+    if (cast.deviceId !== deviceId || cast.agentToken !== connection) {
       this.log.debug({ device: deviceId, sessionId }, "ignored foreign or late cast frame");
       return null;
     }
@@ -331,16 +333,16 @@ export class CastCoordinator {
   }
 
   private expireBind(sessionId: string): void {
-    const cast = this.activeCast;
-    if (!cast || cast.sessionId !== sessionId || cast.state !== "reserved") return;
+    const cast = this.casts.get(sessionId);
+    if (!cast || cast.state !== "reserved") return;
     // The headset was never contacted; there is nothing to stop.
     this.terminate(cast, { reason: "viewer_disconnected" });
     this.log.info({ device: cast.deviceId, sessionId }, "live view reservation expired without a viewer");
   }
 
   private expireApproval(sessionId: string): void {
-    const cast = this.activeCast;
-    if (!cast || cast.sessionId !== sessionId || cast.state !== "awaiting_approval") return;
+    const cast = this.casts.get(sessionId);
+    if (!cast || cast.state !== "awaiting_approval") return;
     this.terminate(cast, {
       reason: "approval_timeout",
       failure: "approval_timeout",
@@ -350,8 +352,8 @@ export class CastCoordinator {
   }
 
   private expireNegotiation(sessionId: string): void {
-    const cast = this.activeCast;
-    if (!cast || cast.sessionId !== sessionId || cast.state !== "negotiating") return;
+    const cast = this.casts.get(sessionId);
+    if (!cast || cast.state !== "negotiating") return;
     this.terminate(cast, {
       reason: "negotiation_timeout",
       failure: "negotiation_timeout",
@@ -366,8 +368,9 @@ export class CastCoordinator {
    * calls are no-ops.
    */
   private terminate(cast: ActiveCast, options: TerminateOptions): void {
-    if (this.activeCast !== cast) return;
-    this.activeCast = null;
+    if (this.casts.get(cast.sessionId) !== cast) return;
+    this.casts.delete(cast.sessionId);
+    this.deviceSessions.delete(cast.deviceId);
     this.clearTimer(cast.bindTimer);
     this.clearTimer(cast.approvalTimer);
     this.clearTimer(cast.negotiationTimer);

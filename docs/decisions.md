@@ -274,3 +274,23 @@ sight), so a rename typed on the headset was silently ignored and the dashboard
 had no rename at all. Flagging typed names, rather than always trusting the
 agent's, keeps a reinstall's default "Quest XXXX" from clobbering "Quest 01".
 Last write wins when both sides rename while disconnected.
+
+## 2026-10-23: Concurrent live views for different headsets
+
+Decision: replace the original global cast slot with independent in-memory
+sessions indexed by session ID and device ID. Keep at most one session/viewer
+per headset; `409 CAST_BUSY` applies only to a second request for that headset.
+Use the existing `screen_cast_v1` messages and APK without a protocol change.
+
+The dashboard owns separate clients, pending requests, streams, retries, and
+customer-app history per headset, displayed in a responsive scrollable dock.
+Game-reopen prompts queue separately, and Escape affects one view or prompt.
+Auth loss and unmount end every locally owned view; server shutdown ends all.
+Direct video-only LAN WebRTC, fresh consent, no persistence, and no media relay
+remain unchanged. Physical multi-headset playback/capacity remains unverified.
+
+Reason: café staff now need to help several customers simultaneously. Each
+headset already publishes independently, so server session isolation and a
+multi-view dashboard provide this without reinstalling the APK. This decision
+supersedes the earlier one-global-stream decision; see
+`superpowers/specs/2026-10-23-multi-device-casting-design.md`.

@@ -86,10 +86,12 @@
   headset accepts only the PC name it remembers, so after a rename staff press
   **Find server** once per headset. On a fresh install with two servers
   answering (say, a laptop running `npm run dev`), the first answer wins.
-- **The live support view is one video-only stream**: no audio, no recording,
-  no screenshots, no second viewer and no streaming to two headsets at once.
-  A second reservation is refused with `CAST_BUSY` until the active session
-  ends, and one headset can never serve two viewers.
+- **Each headset supports one video-only stream**: no audio, no recording,
+  no screenshots and no second viewer for the same headset. A second
+  reservation for that same headset is refused with `CAST_BUSY` until its active
+  session ends. Different headsets may cast
+  concurrently; physical multi-headset playback and practical Wi-Fi/browser
+  capacity remain `UNVERIFIED_HARDWARE` until measured.
 - **No reconnect for a cast**: if the browser reloads or the headset's socket
   drops, the session ends and the viewer must reserve again; there is no resume.
   The dashboard keeps the `sessionId` in memory, so a page refresh also loses a

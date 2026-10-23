@@ -1,5 +1,9 @@
 # One-headset live support view
 
+> Update (2026-10-23): the global single-stream restriction is superseded by
+> [multiple headset live views](../specs/2026-10-23-multi-device-casting-design.md).
+> This original document records the initial implementation.
+
 Date: 2026-10-09 · Status: approved, ready for implementation
 
 ## Problem

@@ -76,7 +76,7 @@ dashboard :5173 (React+Vite)
 server :3000 — Fastify + better-sqlite3
   app.ts    routes, auth hooks, the hello handshake
   hub.ts    live sockets, command lifecycle, 1s sweep, 1s dashboard state push
-  cast-coordinator.ts  the one in-memory live-view session (no SQL, no media)
+  cast-coordinator.ts  per-headset in-memory live-view sessions (no SQL, no media)
   controller-battery.ts  optional ADB poll of Touch-controller levels (off by default)
   discovery.ts  UDP 3000 responder: answers headset probes with name + HTTP port
   catalog-refresh.ts  the one internet fetch, shared by CLI and refresh route
@@ -89,7 +89,7 @@ server :3000 — Fastify + better-sqlite3
 agents: quest-simulator (tests/demo, --url) │ quest-agent APK (hardware, finds the server)
 ```
 
-**Live support view** (`screen_cast_v1`): one global session, one viewer, video
+**Live support view** (`screen_cast_v1`): concurrent per-headset sessions, one viewer per headset, video
 only (960×540 / 15 FPS / 1.5 Mbps), direct LAN WebRTC with an empty ICE-server
 list — no STUN, TURN, SFU, audio, or recording. The server relays signaling and
 keeps nothing: no SDP, ICE, or media in SQLite, files, or logs. MediaProjection
@@ -99,7 +99,11 @@ path (viewer close, DELETE, timeout, agent disconnect/replacement, projection
 revocation, app shutdown) is idempotent. Cast messages extend the wire protocol,
 so they too live in `shared/src/protocol.ts`, `quest-agent/.../Protocol.kt`, and
 `dashboard/src/types.ts`; browser signaling sits in `dashboard/src/casting.ts`
-with the native adapter in `browser-rtc.ts`.
+with the native adapter in `browser-rtc.ts`. `useLiveViews.ts` owns independent
+per-headset dashboard clients, pending requests, retries, and game-resume prompts.
+The dashboard renders a responsive viewer dock; a busy headset never blocks
+casting another device. `CAST_BUSY` only rejects a second session on the same
+headset. Multiple-headset casting needs no APK or wire-protocol update.
 
 **Controller batteries** are optional diagnostics: one global flag in
 `app_settings` (`PUT /api/settings/controller-battery-monitoring`), polled once
