@@ -192,7 +192,10 @@ function stubCastBoard(devices: Device[], beforeDelete?: () => Promise<void>) {
 }
 
 describe("App", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it("shows the board in Turkish and switches back from the top bar", async () => {
     localStorage.setItem(LANG_STORAGE, "tr");
@@ -394,7 +397,10 @@ describe("App", () => {
     });
   });
 
-  it("starts sessions on eligible selected headsets and reports the skipped cards", async () => {
+  it.each([true, false])("starts selected sessions and reports skipped cards (Object.fromEntries available: %s)", async (hasFromEntries) => {
+    if (!hasFromEntries) vi.spyOn(Object, "fromEntries").mockImplementation(() => {
+      throw new TypeError("Object.fromEntries is unavailable on Safari 12");
+    });
     const active = {
       id: "session-2",
       startedAt: new Date().toISOString(),
@@ -510,7 +516,10 @@ describe("App", () => {
     expect(fetchMock.mock.calls.filter((call) => String(call[0]).endsWith("/sessions"))).toHaveLength(0);
   });
 
-  it("launches one game on eligible selected headsets and keeps going after a failure", async () => {
+  it.each([true, false])("launches a selected game and continues after failure (Object.fromEntries available: %s)", async (hasFromEntries) => {
+    if (!hasFromEntries) vi.spyOn(Object, "fromEntries").mockImplementation(() => {
+      throw new TypeError("Object.fromEntries is unavailable on Safari 12");
+    });
     const games: Game[] = [{ id: "beat-saber", name: "Beat Saber", metaAppId: "2448060205267927", enabled: 1 }];
     const fetchMock = stubBoard(
       [

@@ -32,6 +32,30 @@ once to add Desktop and Startup shortcuts, so CafeQuest starts when that
 Windows user signs in. Root `npm run dev` is POSIX-only: `cmd.exe` runs its
 `&` commands one after another, so it never gets past the server.
 
+### Older iPads (iOS 12)
+
+The dashboard build targets Safari/iOS 12, including the first-generation iPad
+Air. Use the **built dashboard**, since Vite's development server requires a
+newer browser. The Windows launcher above already builds and serves it. After
+updating the code, close the two CafeQuest process windows and run the launcher
+again to rebuild.
+
+For a manual setup, keep the backend running and run:
+
+```bash
+npm run build -w dashboard
+npm run preview -w dashboard
+```
+
+Connect the iPad to the café Wi-Fi and open
+`http://<cafe-PC-LAN-IP>:5173` in Safari. Use the café PC's actual local IP;
+`localhost` on the iPad refers to the iPad itself. The PC must allow inbound TCP
+5173 from the café LAN. A blank page can indicate an outdated dashboard build;
+a Safari connection error requires checking the address, Wi-Fi, and firewall.
+After it loads, Safari's **Share → Add to Home Screen** gives staff a convenient
+shortcut. Verify sessions, game launching, and notes on the physical iPad before
+using it for a shift; live-view playback and capacity also need device testing.
+
 The catalog is optional for sideloaded apps: CafeQuest can list and launch them
 directly by Android package ID. `catalog:update` and the dashboard's **Update
 app list** button enrich official apps with their names and numeric Meta App

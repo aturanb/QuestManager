@@ -260,7 +260,7 @@ export function App({ castFactory }: AppProps = {}) {
     setBulkResult(null);
     setBusy((current) => ({
       ...current,
-      ...Object.fromEntries(selected.map((device) => [device.id, true])),
+      ...Object.assign({}, ...selected.map((device) => ({ [device.id]: true }))),
     }));
 
     const eligible = selected.filter((device) => device.online && device.session?.status !== "active");
@@ -288,7 +288,7 @@ export function App({ castFactory }: AppProps = {}) {
 
     setBusy((current) => ({
       ...current,
-      ...Object.fromEntries(selected.map((device) => [device.id, false])),
+      ...Object.assign({}, ...selected.map((device) => ({ [device.id]: false }))),
     }));
     setBulkResult({ originDeviceId, action: "session", succeeded, failed: selected.length - succeeded });
   }
@@ -303,7 +303,7 @@ export function App({ castFactory }: AppProps = {}) {
     setBulkResult(null);
     setBusy((current) => ({
       ...current,
-      ...Object.fromEntries(selected.map((device) => [device.id, true])),
+      ...Object.assign({}, ...selected.map((device) => ({ [device.id]: true }))),
     }));
     setCardErrors((current) => {
       const next = { ...current };
@@ -328,7 +328,7 @@ export function App({ castFactory }: AppProps = {}) {
 
     setBusy((current) => ({
       ...current,
-      ...Object.fromEntries(selected.map((device) => [device.id, false])),
+      ...Object.assign({}, ...selected.map((device) => ({ [device.id]: false }))),
     }));
     setBulkResult({ originDeviceId, action: "launch", gameName, succeeded, failed: selected.length - succeeded });
   }

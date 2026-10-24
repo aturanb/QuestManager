@@ -6,6 +6,9 @@ import react from "@vitejs/plugin-react";
 // Bearer header for REST and as ?key= for the dashboard WebSocket.
 export default defineConfig({
   plugins: [react()],
+  // The café's first-generation iPad Air is limited to iOS/Safari 12.
+  // Use the built dashboard (preview), since Vite's dev client needs a newer browser.
+  build: { target: ["safari12", "ios12"] },
   server: {
     port: 5173,
     proxy: {

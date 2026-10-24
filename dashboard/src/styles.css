@@ -484,10 +484,13 @@ input::placeholder { color: var(--chalk-dim); }
   align-items: start;
   gap: 14px;
   width: min(880px, calc(100vw - 2 * var(--gutter)));
-  max-height: calc(100dvh - 2 * var(--gutter));
+  max-height: calc(100vh - 2 * var(--gutter));
   overflow-y: auto;
   overscroll-behavior: contain;
   pointer-events: none;
+}
+@supports (height: 100dvh) {
+  .cast-views { max-height: calc(100dvh - 2 * var(--gutter)); }
 }
 .cast-views[data-multiple="true"] {
   width: min(1180px, calc(100vw - 2 * var(--gutter)));
